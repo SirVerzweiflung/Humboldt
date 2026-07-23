@@ -43,6 +43,20 @@ export async function createRoom(): Promise<Room> {
   throw new Error("Could not generate a unique room code");
 }
 
+// Become host of an existing room by code (plain takeover — trusted model, §9).
+// Sets host_id to this device's uid. Returns null if no room has that code.
+export async function claimRoom(code: string): Promise<Room | null> {
+  const hostId = await ensureAnonAuth();
+  const { data, error } = await supabase
+    .from("rooms")
+    .update({ host_id: hostId })
+    .eq("code", code.toUpperCase())
+    .select("id, code, host_id, host_claim_code, protocol_version")
+    .maybeSingle();
+  if (error) throw error;
+  return (data as Room) ?? null;
+}
+
 export async function getRoomByCode(code: string): Promise<Room | null> {
   const { data, error } = await supabase
     .from("rooms")

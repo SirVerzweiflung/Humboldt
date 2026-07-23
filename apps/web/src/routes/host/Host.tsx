@@ -1,27 +1,73 @@
 import { useCallback, useEffect, useState } from "react";
 import { RoleBadge } from "../../shared/RoleBadge";
 import { supabase, ensureAnonAuth } from "../../lib/supabase";
-import { createRoom, type Room } from "../../lib/room";
+import { createRoom, claimRoom, getRoomByCode, type Room } from "../../lib/room";
+
+// Which room this device is hosting, remembered across reloads / lock screens so
+// reopening restores the room instead of dumping back to "Create room".
+const HOST_ROOM_KEY = "host_room_code";
 
 export function Host() {
   const [room, setRoom] = useState<Room | null>(null);
+  // Start in "restoring" so we never flash the Create screen before the check.
+  const [restoring, setRestoring] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // On mount: restore the persisted room (same device stays host — its session's
+  // uid already owns the row). Clears the pointer if the room is gone.
   useEffect(() => {
-    ensureAnonAuth().catch((e) => setError(String(e)));
+    (async () => {
+      try {
+        await ensureAnonAuth();
+        const saved = localStorage.getItem(HOST_ROOM_KEY);
+        if (saved) {
+          const r = await getRoomByCode(saved);
+          if (r) setRoom(r);
+          else localStorage.removeItem(HOST_ROOM_KEY);
+        }
+      } catch (e) {
+        setError(String(e));
+      } finally {
+        setRestoring(false);
+      }
+    })();
   }, []);
+
+  function enter(r: Room) {
+    localStorage.setItem(HOST_ROOM_KEY, r.code);
+    setRoom(r);
+  }
 
   async function onCreate() {
     setBusy(true);
     setError(null);
     try {
-      setRoom(await createRoom());
+      enter(await createRoom());
     } catch (e) {
       setError(String(e));
     } finally {
       setBusy(false);
     }
+  }
+
+  async function onRejoin(code: string) {
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await claimRoom(code);
+      if (r) enter(r);
+      else setError(`No room "${code.toUpperCase()}".`);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function leave() {
+    localStorage.removeItem(HOST_ROOM_KEY);
+    setRoom(null);
   }
 
   return (
@@ -31,14 +77,10 @@ export function Host() {
 
       {error && <p className="rounded bg-red-600 px-3 py-2 text-sm">{error}</p>}
 
-      {!room ? (
-        <button
-          onClick={onCreate}
-          disabled={busy}
-          className="rounded-lg bg-white px-6 py-3 text-lg font-semibold text-indigo-700 disabled:opacity-50"
-        >
-          {busy ? "Creating…" : "Create room"}
-        </button>
+      {restoring ? (
+        <p className="opacity-70">Restoring…</p>
+      ) : !room ? (
+        <StartScreen busy={busy} onCreate={onCreate} onRejoin={onRejoin} />
       ) : (
         <>
           <div className="text-center">
@@ -47,6 +89,9 @@ export function Host() {
             <p className="mt-1 text-xs opacity-60">
               Type this into the Board (/board) to open the join screen.
             </p>
+            <button onClick={leave} className="mt-2 text-xs underline opacity-70">
+              Leave room
+            </button>
           </div>
 
           {/* ===== DUMMY SYNC TEST START ===== */}
@@ -55,6 +100,54 @@ export function Host() {
         </>
       )}
     </main>
+  );
+}
+
+function StartScreen({
+  busy,
+  onCreate,
+  onRejoin,
+}: {
+  busy: boolean;
+  onCreate: () => void;
+  onRejoin: (code: string) => void;
+}) {
+  const [code, setCode] = useState("");
+  return (
+    <div className="flex flex-col items-center gap-6">
+      <button
+        onClick={onCreate}
+        disabled={busy}
+        className="rounded-lg bg-white px-6 py-3 text-lg font-semibold text-indigo-700 disabled:opacity-50"
+      >
+        {busy ? "Working…" : "Create room"}
+      </button>
+
+      <div className="flex flex-col items-center gap-2">
+        <p className="text-sm opacity-70">…or rejoin an existing room as host</p>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            onRejoin(code.trim());
+          }}
+          className="flex gap-2"
+        >
+          <input
+            value={code}
+            onChange={(e) => setCode(e.target.value.toUpperCase())}
+            placeholder="ABC123"
+            maxLength={6}
+            className="w-40 rounded-lg bg-white px-3 py-2 text-center font-mono text-xl tracking-widest text-indigo-800"
+          />
+          <button
+            disabled={busy || code.trim().length < 6}
+            className="rounded-lg bg-white/20 px-4 py-2 font-semibold disabled:opacity-50"
+          >
+            Rejoin
+          </button>
+        </form>
+      </div>
+    </div>
   );
 }
 
