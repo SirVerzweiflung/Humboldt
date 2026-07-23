@@ -1,0 +1,15 @@
+{
+  "name": "mapquiz",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "dev": "pnpm --filter web dev",
+    "build": "pnpm --filter web build",
+    "preview": "pnpm --filter web preview",
+    "start": "./scripts/start.sh",
+    "stop": "./scripts/stop.sh"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild"]
+  }
+}

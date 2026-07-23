@@ -1,0 +1,16 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+/* Kill pull-to-refresh; surface gestures handled per-component later (CLAUDE.md §11.3). */
+html,
+body {
+  overscroll-behavior: none;
+}

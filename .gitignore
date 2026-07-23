@@ -1,0 +1,19 @@
+node_modules/
+dist/
+*.local
+
+# dev server (scripts/start.sh)
+.devserver.pid
+.devserver.log
+
+# supabase local
+.branches/
+.temp/
+
+# env
+.env
+.env.*
+!.env.example
+
+# editor / os
+.DS_Store
