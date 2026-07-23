@@ -1,1 +1,0 @@
-{"root":["./src/main.tsx","./src/vite-env.d.ts","./src/lib/protocol.ts","./src/lib/room.ts","./src/lib/supabase.ts","./src/routes/board/Board.tsx","./src/routes/host/Host.tsx","./src/routes/play/Play.tsx","./src/shared/RoleBadge.tsx"],"version":"5.9.3"}
