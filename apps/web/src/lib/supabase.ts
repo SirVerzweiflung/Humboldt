@@ -13,16 +13,18 @@ export const supabase = createClient(url, anon, {
   auth: { persistSession: true, autoRefreshToken: true },
 });
 
-// Anonymous auth: silent, no names, no login UI. Idempotent — reuses the
-// localStorage session on reload so the same device keeps the same auth.uid().
-let authPromise: Promise<string> | null = null;
-export function ensureAnonAuth(): Promise<string> {
-  authPromise ??= (async () => {
-    const { data } = await supabase.auth.getSession();
-    if (data.session) return data.session.user.id;
-    const { data: signed, error } = await supabase.auth.signInAnonymously();
-    if (error) throw error;
-    return signed.user!.id;
-  })();
-  return authPromise;
+// The one place a fresh anonymous session is minted. CAPTCHA is enabled in
+// Supabase Auth, so signInAnonymously requires a Turnstile token. Called only by
+// <AuthGate> on first visit; returning devices reuse the localStorage session.
+export async function signInWithCaptcha(captchaToken: string): Promise<void> {
+  const { error } = await supabase.auth.signInAnonymously({ options: { captchaToken } });
+  if (error) throw error;
+}
+
+// Read the current anonymous uid. By the time any route renders, <AuthGate> has
+// guaranteed a session, so this never needs to sign in itself.
+export async function ensureAnonAuth(): Promise<string> {
+  const { data } = await supabase.auth.getSession();
+  if (!data.session) throw new Error("Not signed in (captcha gate not passed)");
+  return data.session.user.id;
 }

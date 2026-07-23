@@ -668,10 +668,18 @@ and RLS is what protects the data. `SUPABASE_SERVICE_ROLE_KEY` never touches the
 **How the client reads them (Vite).** Vite only exposes vars prefixed `VITE_` to the bundle, so the
 two required client vars are:
 
-| Var | Source (Supabase dashboard → Settings → API) | Required |
+| Var | Source | Required |
 |---|---|---|
-| `VITE_SUPABASE_URL` | Project URL, `https://<ref>.supabase.co` | yes |
-| `VITE_SUPABASE_ANON_KEY` | Project API keys → `anon` `public` | yes |
+| `VITE_SUPABASE_URL` | Supabase → Settings → API → Project URL, `https://<ref>.supabase.co` | yes |
+| `VITE_SUPABASE_ANON_KEY` | Supabase → Settings → API → Project API keys → `anon` `public` | yes |
+| `VITE_TURNSTILE_SITE_KEY` | Cloudflare Turnstile → widget → **Site Key** (public) | yes |
+
+**CAPTCHA (Cloudflare Turnstile).** Anonymous sign-in is CAPTCHA-protected in Supabase Auth
+(Auth → Attack Protection). So `signInAnonymously({ options: { captchaToken } })` needs a token from a
+Turnstile widget. `<AuthGate>` (in `apps/web/src/shared/`) renders the widget on first visit only —
+returning devices reuse the localStorage session and never see it. The Turnstile **secret** key lives
+in the Supabase dashboard, never in the client; only the **site** key is in the bundle. Local dev can
+use Cloudflare's always-pass test site key `1x00000000000000000000AA`.
 
 - `CONSTRAINT` The `VITE_` prefix is mandatory — a var without it is invisible to `import.meta.env`
   at build time. Never name a client var `SUPABASE_SERVICE_ROLE_KEY` (or prefix it `VITE_`); the
