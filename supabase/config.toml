@@ -1,6 +1,6 @@
 # Minimal Supabase config. The project_id must match your Supabase project ref
 # once linked (supabase link --project-ref <ref>). Only the pieces we use now.
-project_id = "mapquiz"
+project_id = "hmnynsajduvwhgslaiow"
 
 [db]
 # Postgres major version of the linked project (Supabase default is 15).
