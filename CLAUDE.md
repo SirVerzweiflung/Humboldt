@@ -80,25 +80,50 @@ optional per round and purely cosmetic (`OPEN`).
 
 One repo, one Vite app, three routes — not three deployments.
 
+`[now]` = scaffolded and on disk today. `[planned]` = intended, created when the feature that
+needs it lands (§13 build order). Don't create `[planned]` dirs empty; add them with their first
+real file.
+
 ```
 /
-├── CLAUDE.md                  ← this file
-├── package.json               ← pnpm workspaces
+├── CLAUDE.md                  ← this file                                  [now]
+├── package.json               ← root, pnpm workspaces, start/stop scripts  [now]
+├── pnpm-workspace.yaml        ← globs apps/* (packages/* added when needed) [now]
+├── .gitignore                 ← node_modules, dist, .env*, .devserver.*    [now]
+├── scripts/
+│   ├── start.sh               ← detached vite dev server (setsid group)    [now]
+│   └── stop.sh                ← kills the whole process group              [now]
 ├── apps/web/
-│   ├── src/routes/play/       ← phone
-│   ├── src/routes/host/       ← tablet
-│   ├── src/routes/board/      ← TV
-│   └── src/main.tsx
-├── packages/
-│   ├── protocol/              ← shared types, PROTOCOL_VERSION, quiz-file zod schema
+│   ├── index.html                                                          [now]
+│   ├── vite.config.ts         ← host:true (LAN), port 5173                 [now]
+│   ├── tailwind.config.js · postcss.config.js · tsconfig.json             [now]
+│   ├── .env                   ← VITE_SUPABASE_* (gitignored, see §10.4)    [planned]
+│   ├── .env.example           ← committed template of the above           [planned]
+│   └── src/
+│       ├── main.tsx           ← router: / → /board, /play /host /board    [now]
+│       ├── index.css          ← tailwind directives + touch resets        [now]
+│       ├── shared/            ← in-app shared React components (RoleBadge) [now]
+│       │                        promote to packages/ui only if a 2nd app appears
+│       └── routes/{play,host,board}/                                      [now]
+├── packages/                  ← added incrementally; NOT scaffolded yet    [planned]
+│   ├── protocol/              ← shared types, PROTOCOL_VERSION, quiz zod schema
 │   ├── supabase/              ← typed client, generated DB types, channel helpers
 │   ├── surface/               ← <QuizSurface>: geo + image renderers behind one interface
-│   └── ui/
+│   └── ui/                    ← only if shared/ needs to cross app boundaries
 ├── supabase/
-│   ├── migrations/            ← deployed by the GitHub integration (§10)
-│   └── seed.sql
-└── public/geo/                ← TopoJSON/GeoJSON layer assets (§6.3)
+│   ├── config.toml            ← project_id = project ref (§10.2)           [now]
+│   ├── migrations/            ← deployed by the GitHub integration (§10)   [now: 0001 rooms]
+│   └── seed.sql                                                            [planned]
+└── public/geo/                ← TopoJSON/GeoJSON layer assets (§6.3)       [planned]
 ```
+
+**Deliberate deviations from the original sketch:**
+- `packages/*` is deferred. With one app, shared code lives in `apps/web/src/shared/`; a workspace
+  package earns its keep only when a second consumer exists. `pnpm-workspace.yaml` globs `apps/*`
+  only for now — widen to `packages/*` when the first package lands.
+- `scripts/` (start/stop) is new and belongs in the shape; it's the servable-site entry point.
+- `packages/supabase` (typed client) stays `[planned]`: until it exists, the app reads
+  `import.meta.env.VITE_SUPABASE_*` directly (§10.4).
 
 **Why one app:** shared types can't drift, one build, one deploy, and no **version skew** between a
 phone running yesterday's bundle and a TV running today's.
@@ -634,11 +659,45 @@ Target setup: **static SPA served by Caddy (or nginx) on Debian, exposed through
 - `OPEN`: separate hostnames or paths per role (`/play`, `/host`, `/board`) — paths are simpler and
   keep one origin, so one deploy and one storage/auth origin. Recommend paths.
 
-### 10.4 Secrets
+### 10.4 Secrets and client env vars
 
 Only `SUPABASE_URL` and `SUPABASE_ANON_KEY` may appear in the client bundle; they're public by design
 and RLS is what protects the data. `SUPABASE_SERVICE_ROLE_KEY` never touches the frontend, a bundled
 `.env`, or the repo — GitHub Actions secrets and (if ever used) Edge Functions only.
+
+**How the client reads them (Vite).** Vite only exposes vars prefixed `VITE_` to the bundle, so the
+two required client vars are:
+
+| Var | Source (Supabase dashboard → Settings → API) | Required |
+|---|---|---|
+| `VITE_SUPABASE_URL` | Project URL, `https://<ref>.supabase.co` | yes |
+| `VITE_SUPABASE_ANON_KEY` | Project API keys → `anon` `public` | yes |
+
+- `CONSTRAINT` The `VITE_` prefix is mandatory — a var without it is invisible to `import.meta.env`
+  at build time. Never name a client var `SUPABASE_SERVICE_ROLE_KEY` (or prefix it `VITE_`); the
+  prefix is exactly what would leak it into the bundle.
+- Live at `apps/web/.env` (loaded by Vite), **gitignored**. Commit `apps/web/.env.example` with the
+  keys present and values blank as the canonical list of what a build needs.
+- Read them in **one module only** (`packages/supabase` once it exists; until then a single
+  `apps/web/src/lib/supabase.ts`), and **fail fast** at startup if either is missing — a blank
+  `VITE_SUPABASE_URL` otherwise surfaces as a confusing runtime 404, not a clear "env not set".
+
+  ```ts
+  const url = import.meta.env.VITE_SUPABASE_URL;
+  const anon = import.meta.env.VITE_SUPABASE_ANON_KEY;
+  if (!url || !anon) throw new Error('Missing VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY');
+  ```
+
+- These are **build-time** values: the CI/CD build (§10.3) must have them in its environment, since
+  `import.meta.env` is inlined at build, not read at runtime on the box.
+
+`.env.example` template:
+
+```dotenv
+# apps/web/.env — copy to .env and fill from Supabase → Settings → API. Never commit .env.
+VITE_SUPABASE_URL=
+VITE_SUPABASE_ANON_KEY=
+```
 
 ---
 
