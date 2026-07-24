@@ -13,16 +13,19 @@ participants tap a point on a near-empty map (or on a picture); the moderator th
 submitted pins one at a time on a big screen, optionally drops the real solution, and awards points
 by hand.
 
-**A quiz is a one-time event.** There is no quiz library, no accounts, no persistent content
-catalogue. The host uploads a quiz file into a freshly created room, the room is played once, and
-the results are exported at the end.
+**A room is a one-time event; a quiz is reusable.** There are no accounts. A quiz is authored ahead
+of time in the **in-app quiz editor** (§4) and stored in the database under one long, secret
+**quizcode**. To create a room the host enters that quizcode; the quiz is loaded from the DB and
+**snapshot-copied** into the room (§3) — no file upload, no zip, nothing fragile to hand a moderator
+on the night. The room is played once and the results are exported at the end; the quiz itself
+persists and can seed another room later.
 
 Three simultaneous browser clients, all React, all talking to one Supabase project:
 
 | Client | Device | Role |
 |---|---|---|
 | **Player** | Phone (portrait) | Join by code, nickname, place one pin, submit. Sees own answer, then whatever the host reveals. |
-| **Host** | Tablet / iPad (landscape) | The control surface. Uploads the quiz, opens/closes answering, **sees answers arrive live**, reveals them one by one, drops the solution, awards points, advances rounds. |
+| **Host** | Tablet / iPad (landscape) | The control surface. Loads a quiz by quizcode (authored in the editor, §4), opens/closes answering, **sees answers arrive live**, reveals them one by one, drops the solution, awards points, advances rounds. Also the entry point to the quiz editor. |
 | **Board** | Laptop browser → TV/beamer | Read-only projection. Question, "n of m answered", revealed pins + distances, solution, leaderboard. Zero interaction. |
 
 ### The round loop (this drives everything else)
@@ -60,7 +63,10 @@ optional per round and purely cosmetic (`OPEN`).
 - **No automatic scoring.** Distance is *displayed*, never converted to points by the app.
   (Leaving the door open: distance is stored, so an auto-scoring mode can be added later without a
   migration.)
-- **No question bank / quiz editing UI** for now. Quizzes arrive as a file.
+- **No public quiz library / accounts.** Quizzes are authored in the in-app editor (§4) and are
+  discoverable only by their secret quizcode — there is no browsable catalogue and no login. (This
+  supersedes the earlier "quizzes arrive as a file" decision: the editor + DB replace file upload;
+  a one-way JSON **export** remains as backup, §4.)
 
 ---
 
@@ -71,7 +77,7 @@ optional per round and purely cosmetic (`OPEN`).
 - **MapLibre GL JS** for geographic surfaces (§6).
 - **Custom pan/zoom component** for image surfaces (§7).
 - **@turf/turf** for great-circle distance.
-- **zod** for validating the uploaded quiz file and every realtime payload.
+- **zod** for validating the quiz editor payload (before save/export) and every realtime payload.
 - **Tailwind** vs CSS modules — `OPEN`, pick one.
 - Client state: a **single reducer over server truth**, not scattered `useState`. Zustand or
   context+reducer, `OPEN`.
@@ -104,7 +110,9 @@ real file.
 │       ├── index.css          ← tailwind directives + touch resets        [now]
 │       ├── shared/            ← in-app shared React components (RoleBadge) [now]
 │       │                        promote to packages/ui only if a 2nd app appears
-│       └── routes/{play,host,board}/                                      [now]
+│       └── routes/
+│           ├── {play,host,board}/                                        [now]
+│           └── quiz/            ← quiz editor (create/edit by quizcode, §4) [planned]
 ├── packages/                  ← added incrementally; NOT scaffolded yet    [planned]
 │   ├── protocol/              ← shared types, PROTOCOL_VERSION, quiz zod schema
 │   ├── supabase/              ← typed client, generated DB types, channel helpers
@@ -156,10 +164,12 @@ rooms
   reveal_seq         int  not null default 0   -- bumped on EVERY reveal action (§5)
   protocol_version   int  not null
   quiz_title         text
+  source_quiz_id     uuid           -- provenance: the quiz this room was snapshot from (§4). nullable
   created_at         timestamptz default now()
   expires_at         timestamptz default now() + interval '30 days'
 
--- ── content, written once at quiz upload ─────────────────────────────────
+-- ── content, snapshot-copied from the quiz at room creation (§4) ──────────
+-- (immutable for the life of the room; editing the source quiz never touches it)
 rounds                              -- PUBLIC: readable by everyone in the room
   id            uuid pk
   room_id       uuid references rooms on delete cascade
@@ -247,66 +257,121 @@ Everything else is convenience-grade:
 - Auth: `supabase.auth.signInAnonymously()`, session persisted in `localStorage` so a reload or a
   locked screen rejoins as the same person rather than creating a duplicate player.
 
-No `SECURITY DEFINER` scoring function is needed any more — points are manual and distance is
-display-only. That deletes an entire class of complexity from the original design.
+No `SECURITY DEFINER` scoring function is needed for **scoring** — points are manual and distance is
+display-only. (The quiz editor does use `SECURITY DEFINER` RPCs, but for a different reason — see the
+next subsection.)
+
+### Authored quizzes — the editor's master tables (§4)
+
+These are separate from the play-time tables above. They hold the reusable quiz the host builds in
+the editor, discoverable **only** by its secret quizcode. A room never reads them directly at play
+time — room creation snapshot-copies a quiz into `rounds` + `round_solutions` (above).
+
+```sql
+quizzes
+  id          uuid pk
+  quizcode    text unique not null     -- long, URL-safe, ~20 chars (§4). The ONE secret + handle.
+  title       text not null
+  created_at  timestamptz default now()
+  updated_at  timestamptz default now()
+
+quiz_questions                          -- one row per question, ordered by idx
+  id            uuid pk
+  quiz_id       uuid references quizzes on delete cascade
+  idx           int not null           -- question order; reorder = renumber idx
+  prompt        text not null
+  surface_kind  text not null          -- 'geo' | 'image'
+  surface_ref   text not null          -- geo: preset id | image: storage object path (§4)
+  surface_meta  jsonb not null         -- resolved preset (§6.4) | image natural size (§7.2)
+  unique (quiz_id, idx)
+
+quiz_solutions                          -- SECRET: the answer being authored
+  question_id uuid pk references quiz_questions on delete cascade
+  quiz_id     uuid not null
+  solution    jsonb not null           -- geo: {lat,lng} | image: {x,y} normalised 0..1
+  label       text
+```
+
+**Access is code-gated, not uid-gated.** The quizcode is the sole credential, and it must let a host
+edit from *any* device (no accounts). But `quiz_solutions` is secret, so a permissive public SELECT
+is unacceptable. Resolution:
+
+- `CONSTRAINT` RLS on all three `quiz_*` tables **denies direct client access entirely** (RLS on, no
+  permissive policies). The client never `select`s or `insert`s these tables directly.
+- All editor + room-creation access goes through **`SECURITY DEFINER` RPCs** that take the quizcode
+  and verify it inside the function:
+  - `quiz_load(quizcode)` → the full quiz (questions + solutions) for the editor.
+  - `quiz_save(quizcode, payload jsonb)` → validate + upsert questions/solutions, bump `updated_at`.
+  - `quiz_create()` → mint a new quiz with a fresh random quizcode; returns it once.
+  - `room_create_from_quiz(quizcode)` → insert a room (`host_id = auth.uid()`, `source_quiz_id`)
+    plus the snapshot `rounds` + `round_solutions`, and return the room code. This is the **only**
+    path that copies secret solutions into a room, and it runs server-side so the client never sees
+    another quiz's solutions.
+- The quizcode is unguessable (≈120 bits); brute-forcing the RPC is the only attack surface and this
+  is a party game (`CONSTRAINT`, §3 philosophy). Add basic rate-limiting later if it ever matters
+  (`OPEN`).
+- Images referenced by a quiz live in Storage exactly as in §4 (bucket `quiz-assets`, unguessable
+  paths); they are uploaded during authoring, not at room creation.
 
 ---
 
-## 4. The quiz file
+## 4. The quiz editor
 
-The host prepares a quiz beforehand and uploads it into a room.
+A dedicated screen at `/quiz`, **reached from the Host screen** (a "Create / edit quiz" button — not
+linked from Board or Player). The host authors the quiz here ahead of the event; it is saved to the
+DB (§3) under one long secret **quizcode**, and later loaded into a room by that code (§9-style flow,
+no files).
 
-```jsonc
-{
-  "format": "mapquiz-quiz",
-  "version": 1,
-  "title": "Pub Quiz, July 2026",
-  "rounds": [
-    {
-      "prompt": "Where is Rome?",
-      "surface": {
-        "kind": "geo",
-        "preset": "europe",            // see §6.4
-        "detail": "50m",
-        "layers": ["coastline", "admin0_borders", "lakes"],
-        "bbox": [-11, 34, 32, 60]      // optional starting view
-      },
-      "solution": { "lat": 41.9028, "lng": 12.4964, "label": "Rome" }
-    },
-    {
-      "prompt": "Where on this photo is the cathedral?",
-      "surface": {
-        "kind": "image",
-        "file": "images/skyline.jpg",  // relative path inside the upload
-        "fit": "contain"
-      },
-      "solution": { "x": 0.4123, "y": 0.6710, "label": "Cathedral spire" }
-    }
-  ]
-}
-```
+### Entering the editor
 
-Upload UX on the Host tablet:
+- **New quiz:** the editor calls `quiz_create()`, which mints a quiz with a fresh random quizcode and
+  shows it prominently with a copy button and a "save this — it's the only way back in" warning.
+- **Edit existing:** the host types the **quizcode** (it is long enough to *be* the passcode, ≈20
+  URL-safe chars ≈120 bits; there is no separate password). `quiz_load(quizcode)` returns the quiz;
+  a wrong/unknown code just fails to load. Losing the quizcode means losing edit access — by design,
+  since the code is the only credential.
 
-- Accept either a single `.json` (geo-only quizzes) or a `.zip` containing `quiz.json` + an
-  `images/` folder. A zip is the least error-prone thing to hand a non-technical moderator.
-- Validate with the zod schema in `packages/protocol` **before** writing anything, and show a
-  human-readable error list ("round 3: solution.lat missing"). A quiz that half-uploads at 20:05 on
-  quiz night is the worst possible failure.
-- Images go to **Supabase Storage**, bucket `quiz-assets`, path `rooms/{room_id}/{uuid}.{ext}`.
-  Rewrite `surface_ref` to the storage path. Use random UUID filenames so nobody guesses the next
-  question's picture from a URL pattern.
-  - Downscale client-side to max ~2000 px on the long edge and re-encode to WebP/JPEG before upload.
-    Free tier gives 1 GB storage and 5 GB egress/month; 20 players × 20 images is fine at ~300 KB
-    each, careless 8 MB phone photos are not.
-  - Bucket is public-read with unguessable paths (`OPEN`: switch to signed URLs if that ever feels
-    too loose — it's a one-line change).
-- Then insert `rounds` + `round_solutions` in a single transaction and flip the room to `lobby`.
-- Provide a **re-upload / replace quiz** action while still in `lobby`, and a
-  **download template quiz** link so the host has a known-good starting file.
+### Editing UX
 
-`OPEN`: a minimal in-app quiz builder (click the map, type the prompt, export JSON) is the obvious
-follow-up, and it reuses `<QuizSurface>` entirely. Not needed for v1.
+- **Question list** with drag-to-reorder (reorder renumbers `quiz_questions.idx`). Add / duplicate /
+  delete a question.
+- **Per question:**
+  - **Prompt** text.
+  - **Surface choice — map _or_ image**, mutually exclusive:
+    - **Map:** pick a preset (§6.4) and layer set. Solution is placed by clicking the map; stored as
+      `{lat, lng}` for full accuracy (the map is the accurate surface, §7 explains why images aren't).
+    - **Image:** upload a picture (see Storage below). Solution is placed by **dropping a pin on the
+      image**; stored as normalised `{x, y}` in 0..1 (§7.2).
+  - **Solution label** (optional, e.g. "Rome", "the cathedral spire").
+  - The solution is authored using **`<QuizSurface mode="author">`** (§8) — the same component the
+    players and Board use, so what the host clicks is exactly what gets rendered.
+- **Validation** with the zod schema in `packages/protocol` before every save; show a human-readable
+  error list ("question 3: no solution placed"). Editor state is client-side; **explicit Save** calls
+  `quiz_save(quizcode, payload)` (autosave is `OPEN`).
+
+### Images → Supabase Storage
+
+- Bucket `quiz-assets`, path `quizzes/{quiz_id}/{uuid}.{ext}` (was `rooms/{room_id}/…` when quizzes
+  were room-scoped; they are now quiz-scoped). `surface_ref` holds the storage path; random UUID
+  filenames so nobody guesses another question's picture from a URL pattern.
+- Downscale client-side to max ~2000 px long edge and re-encode to WebP/JPEG before upload. Free tier
+  is 1 GB storage / 5 GB egress; ~300 KB each is fine, careless 8 MB phone photos are not.
+- Bucket is public-read with unguessable paths (`OPEN`: signed URLs if that ever feels too loose).
+- Room creation does **not** re-upload; the snapshot's `surface_ref` points at the same Storage
+  object, shared by every room spawned from the quiz.
+
+### Backup
+
+- A one-way **JSON export** of the current quiz (download button) is the backup mechanism — a known
+  file format for keeping a copy of an evening's work. There is **no import/upload path**; the DB +
+  quizcode is the source of truth. (Reinstating import later is `OPEN` and would reuse the same zod
+  schema.)
+
+### Creating a room from a quiz (§9 flow)
+
+On the Host screen, "Create room" asks for a quizcode and calls `room_create_from_quiz(quizcode)`
+(§3), which snapshot-copies the quiz into `rounds` + `round_solutions`, sets `rooms.quiz_title` and
+`source_quiz_id`, and returns the room code. No upload, no zip, nothing to go wrong at 20:05.
 
 ---
 
@@ -482,7 +547,7 @@ Self-host everything (§10).
 ### 6.4 Presets
 
 A "preset" bundles a bbox, a default detail scale, and a default layer set:
-`world`, `europe`, `austria`, … so the quiz file can just say `"preset": "europe"`. There are two
+`world`, `europe`, `austria`, … so a quiz question can just record `"preset": "europe"`. There are two
 sides to a preset and they must not be confused:
 
 - **Build-time catalogue — `tools/geo/presets.json`** (§6.3). The source of truth the asset pipeline
@@ -549,7 +614,7 @@ const pctDiag = 100 * px / Math.hypot(naturalWidth, naturalHeight);
 Show **both** "318 px" and "7.4 % of image" — the percentage is the honest, device-independent one
 and is the better thing to put on the Board; pixels are the intuitive one for the host.
 
-`OPEN` — optional real-world scale: let the quiz file supply
+`OPEN` — optional real-world scale: let an image question's `surface_meta` supply
 `"scale": { "px_per_unit": 12.4, "unit": "m" }` (or two calibration points plus a known distance),
 and the Board can then say "38 m off" for floorplans, maps-as-images, or aerial photos. Cheap to add,
 skip for v1.
@@ -567,7 +632,11 @@ type SurfacePoint =
 
 <QuizSurface
   surface={round.surface}            // discriminated union, geo | image
-  mode="answer" | "spectate"         // answer = one draggable-then-submittable pin
+  mode="answer" | "spectate" | "author"
+                                     // answer  = player places one draggable-then-submittable pin
+                                     // spectate = read-only (Board, own submitted answer)
+                                     // author   = quiz editor places/drags the SOLUTION pin (§4);
+                                     //            onPick emits the solution SurfacePoint
   myPin={SurfacePoint | null}
   revealedPins={{ player, point, order, distance }[]}
   solution={SurfacePoint | null}
@@ -823,8 +892,9 @@ development — a stale shell on quiz night is worse than a slow first load.
 1. Restore the Supabase project if it has paused (7-day rule).
 2. Open the Board, go fullscreen, confirm the room code and QR are inside the safe area.
 3. Set the tablet to never auto-lock; confirm the wake lock chip is green.
-4. Upload the quiz; step through every round in a "dry run" mode that shows the surface without
-   opening answering (`OPEN` — worth building, it catches broken images and bad bboxes).
+4. Have the quizcode ready; create the room from it and step through every round in a "dry run" mode
+   that shows the surface without opening answering (`OPEN` — worth building, it catches broken
+   images and bad bboxes).
 5. Confirm one phone can join, submit, and see a reveal.
 
 ---
@@ -839,11 +909,18 @@ Each step de-risks the next.
 3. The full phase machine and reveal flow **with no surface at all** — just buttons, a phase label,
    and a list of fake answers. Then **lock the host tablet for 60 seconds and confirm everything
    repairs itself.** Do this before building any UI you'd be sad to throw away.
-4. Quiz file schema + upload + validation.
+4. **Quiz data model + code-gated RPCs** (§3/§4): `quizzes/quiz_questions/quiz_solutions` tables
+   (RLS deny-all) and the `quiz_create / quiz_load / quiz_save / room_create_from_quiz` functions,
+   plus the editor payload zod schema. Prove from two browsers that a client **cannot** directly
+   `select` `quiz_solutions`, and that `room_create_from_quiz(quizcode)` snapshot-copies the quiz
+   into `rounds` + `round_solutions`. Wire "Create room" on the Host to take a quizcode.
 5. `<QuizSurface>` geo backend with Natural Earth layers; click → lat/lng; reveal + distance.
 6. `<QuizSurface>` image backend; upload to Storage; normalised coords; pixel/percent distance.
-7. Manual scoring, leaderboard, export.
-8. Board polish, wake locks, PWA, deployment pipeline, checklist page.
+7. **Quiz editor screen** (`/quiz`, reached from Host): question list with drag-reorder, per-question
+   map-or-image choice, prompt, and solution placement via `<QuizSurface mode="author">`; save via
+   `quiz_save`; JSON export. Reuses steps 5 + 6, so it comes after them.
+8. Manual scoring, leaderboard, export.
+9. Board polish, wake locks, PWA, deployment pipeline, checklist page.
 
 ---
 
@@ -852,10 +929,42 @@ Each step de-risks the next.
 - TypeScript `strict: true`; no `any` in `packages/protocol`.
 - `supabase gen types typescript --linked > packages/supabase/src/database.types.ts`, committed, and
   regenerated in the same commit as the migration that changes the schema.
-- Validate every realtime payload and the whole quiz file with zod at the boundary.
+- Validate every realtime payload and the quiz editor payload with zod at the boundary.
 - `SurfacePoint` is the only representation of a point anywhere in the codebase. No loose
   `{lat,lng}` and no raw pixels outside the image renderer.
 - All time is `timestamptz`, UTC, server-generated. Never `new Date()` for anything authoritative.
 - Every host action that changes what is *visible* (not just what exists) bumps `rooms.reveal_seq`
   in the same transaction.
 - Co-locate tests with source; Vitest.
+- **Colour: only the §15 palette + white text.** No off-palette Tailwind colours (`slate-800`,
+  `red-600`, …) and no raw hex outside the palette definitions. Dark text is always `gunmetal`.
+
+---
+
+## 15. Visual design — colour palette
+
+`CONSTRAINT` The project has **one fixed five-colour palette**. It is the *only* set of colours
+allowed anywhere — UI, map layers, pins, Board, charts. The **single** permitted addition is **white
+text** (on a dark-enough palette background). **Dark text is always `gunmetal` (`#424242`)** — never
+pure black, never an off-palette grey.
+
+| Token (Tailwind / CSS var) | Hex | Name | Typical use |
+|---|---|---|---|
+| `wheat` / `--wheat` | `#ebd1ad` | Wheat | light fills, land, warm accents |
+| `palm` / `--palm` | `#93914d` | Palm Leaf | Player background, muted accent |
+| `gunmetal` / `--gunmetal` | `#424242` | Gunmetal | **the only dark** — all dark text, Board/AuthGate bg |
+| `pacific` / `--pacific` | `#5296a5` | Pacific Cyan | Host background, primary/interactive accent |
+| `pink` / `--pink` | `#f8a0cb` | Baby Pink | attention/error surfaces (with `gunmetal` text), highlight pin |
+
+**Rules**
+- Use the Tailwind tokens (`bg-pacific`, `text-gunmetal`, …) in components; use the CSS vars
+  (`var(--pink)`) only where Tailwind can't reach (canvas, MapLibre paint, inline SVG).
+- White (`text-white`) is allowed **only as text**, and only on a background dark enough to pass
+  contrast (`gunmetal`, `pacific`, `palm`). Never white text on `wheat` or `pink`.
+- Any surface using `pink` or `wheat` as a background takes `text-gunmetal`, not white.
+- Error/attention chips: `bg-pink text-gunmetal` (replaces the old `bg-red-600`).
+- Map/QR/canvas ink that must read as "dark" uses `gunmetal`, not `#000`.
+
+Defined once: Tailwind tokens in [tailwind.config.js](apps/web/tailwind.config.js), CSS vars in
+[index.css](apps/web/src/index.css) (`body` defaults to `gunmetal` text). Per-role backgrounds today:
+Board/AuthGate `gunmetal`, Host `pacific`, Player `palm`.
