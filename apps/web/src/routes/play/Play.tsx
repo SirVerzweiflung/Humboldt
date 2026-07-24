@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { RoleBadge } from "../../shared/RoleBadge";
 import { supabase, ensureAnonAuth } from "../../lib/supabase";
 import { getRoomByCode, type Room } from "../../lib/room";
+import { errMsg } from "../../lib/errMsg";
 
 export function Play() {
   const [params] = useSearchParams();
@@ -59,7 +60,7 @@ function InRoom({ code }: { code: string }) {
         if (!r) setError(`No room "${code}".`);
         else setRoom(r);
       } catch (e) {
-        setError(String(e));
+        setError(errMsg(e));
       }
     })();
   }, [code]);
@@ -100,7 +101,7 @@ function DummySender({ roomId }: { roomId: string }) {
       if (err) throw err;
       setCounter(next);
     } catch (e) {
-      setError(String(e));
+      setError(errMsg(e));
     } finally {
       setSending(false);
     }

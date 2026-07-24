@@ -3,6 +3,7 @@ import type { Preset } from "../../lib/geo";
 import type { QuizQuestion } from "../../lib/quizSchema";
 import type { SurfacePoint } from "../../lib/surfacePoint";
 import { uploadImage } from "../../lib/upload";
+import { errMsg } from "../../lib/errMsg";
 import { GeoSurface } from "../../surface/GeoSurface";
 import { ImageSurface } from "../../surface/ImageSurface";
 
@@ -161,7 +162,7 @@ function ImageEditor({
         solution: null,
       });
     } catch (e) {
-      setError(String(e));
+      setError(errMsg(e));
     } finally {
       setBusy(false);
     }

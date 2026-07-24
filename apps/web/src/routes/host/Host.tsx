@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { RoleBadge } from "../../shared/RoleBadge";
 import { supabase, ensureAnonAuth } from "../../lib/supabase";
 import { createRoom, claimRoom, getRoomByCode, type Room } from "../../lib/room";
+import { errMsg } from "../../lib/errMsg";
 
 // Which room this device is hosting, remembered across reloads / lock screens so
 // reopening restores the room instead of dumping back to "Create room".
@@ -28,7 +29,7 @@ export function Host() {
           else localStorage.removeItem(HOST_ROOM_KEY);
         }
       } catch (e) {
-        setError(String(e));
+        setError(errMsg(e));
       } finally {
         setRestoring(false);
       }
@@ -46,7 +47,7 @@ export function Host() {
     try {
       enter(await createRoom());
     } catch (e) {
-      setError(String(e));
+      setError(errMsg(e));
     } finally {
       setBusy(false);
     }
@@ -60,7 +61,7 @@ export function Host() {
       if (r) enter(r);
       else setError(`No room "${code.toUpperCase()}".`);
     } catch (e) {
-      setError(String(e));
+      setError(errMsg(e));
     } finally {
       setBusy(false);
     }

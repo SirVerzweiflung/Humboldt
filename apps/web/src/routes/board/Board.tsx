@@ -3,6 +3,7 @@ import { QRCodeSVG } from "qrcode.react";
 import { RoleBadge } from "../../shared/RoleBadge";
 import { ensureAnonAuth } from "../../lib/supabase";
 import { getRoomByCode } from "../../lib/room";
+import { errMsg } from "../../lib/errMsg";
 
 export function Board() {
   const [code, setCode] = useState<string | null>(null);
@@ -33,7 +34,7 @@ function JoinForm({ onJoined }: { onJoined: (code: string) => void }) {
       if (!room) setError("No room with that code.");
       else onJoined(room.code);
     } catch (err) {
-      setError(String(err));
+      setError(errMsg(err));
     } finally {
       setBusy(false);
     }

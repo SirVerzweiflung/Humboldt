@@ -4,6 +4,7 @@ import { ensureAnonAuth } from "../../lib/supabase";
 import { loadManifest, type Preset } from "../../lib/geo";
 import { quizCreate, quizLoad, quizSave } from "../../lib/quiz";
 import type { Quiz, QuizQuestion } from "../../lib/quizSchema";
+import { errMsg } from "../../lib/errMsg";
 import { QuestionEditor } from "./QuestionEditor";
 
 const EDIT_CODE_KEY = "quiz_edit_code";
@@ -27,7 +28,7 @@ export function QuizPage() {
           else localStorage.removeItem(EDIT_CODE_KEY);
         }
       } catch (e) {
-        setError(String(e));
+        setError(errMsg(e));
       }
     })();
   }, []);
@@ -70,7 +71,7 @@ function QuizEntry({ onOpen, onError }: { onOpen: (q: Quiz) => void; onError: (e
       const q = await quizLoad(quizcode);
       if (q) onOpen(q);
     } catch (e) {
-      onError(String(e));
+      onError(errMsg(e));
     } finally {
       setBusy(false);
     }
@@ -85,7 +86,7 @@ function QuizEntry({ onOpen, onError }: { onOpen: (q: Quiz) => void; onError: (e
       if (q) onOpen(q);
       else setNotFound(true);
     } catch (err) {
-      onError(String(err));
+      onError(errMsg(err));
     } finally {
       setBusy(false);
     }
