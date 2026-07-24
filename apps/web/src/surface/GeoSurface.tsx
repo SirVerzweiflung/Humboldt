@@ -55,11 +55,8 @@ async function fetchLayer(url: string): Promise<GeoJSON.FeatureCollection> {
 }
 
 function pinElement(pin: SurfacePin): HTMLElement {
-  // The element's box must be JUST the dot, so Marker anchor:"center" puts the
-  // dot exactly on the lng/lat at every zoom. The label is absolutely positioned
-  // and out of flow, so it never shifts the anchor.
-  const el = document.createElement("div");
-  el.style.cssText = "position:relative";
+  // Just the dot — no label. A dot-only element anchored at its centre sits
+  // exactly on the lng/lat at every zoom (a label in the box shifted the anchor).
   const dot = document.createElement("div");
   if (pin.solution) {
     dot.style.cssText =
@@ -67,17 +64,8 @@ function pinElement(pin: SurfacePin): HTMLElement {
   } else {
     dot.style.cssText = `width:14px;height:14px;border-radius:50%;background:${pin.color};border:2px solid #fff;box-shadow:0 0 0 1px #424242`;
   }
-  el.appendChild(dot);
-  if (pin.label) {
-    const lbl = document.createElement("span");
-    lbl.textContent = pin.label;
-    lbl.style.cssText =
-      "position:absolute;left:calc(100% + 6px);top:50%;transform:translateY(-50%);" +
-      "font:600 12px/1 sans-serif;color:#424242;background:rgba(255,255,255,.85);" +
-      "padding:1px 4px;border-radius:4px;white-space:nowrap;pointer-events:none";
-    el.appendChild(lbl);
-  }
-  return el;
+  dot.title = pin.label ?? "";
+  return dot;
 }
 
 type Props = {
