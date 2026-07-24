@@ -215,7 +215,8 @@ function Editor({
         <input
           value={quiz.title}
           onChange={(e) => setQuiz({ ...quiz, title: e.target.value })}
-          className="rounded border border-gunmetal/30 bg-white p-2 font-semibold"
+          placeholder="Quiz name"
+          className="rounded border border-gunmetal/30 bg-white p-2 font-semibold placeholder:font-normal placeholder:italic placeholder:text-gunmetal/40"
         />
         <QuizCodeRow code={quiz.quizcode} />
         <div className="flex gap-2">

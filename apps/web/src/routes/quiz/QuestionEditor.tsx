@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Preset } from "../../lib/geo";
 import type { QuizQuestion } from "../../lib/quizSchema";
 import type { SurfacePoint } from "../../lib/surfacePoint";
@@ -65,12 +65,15 @@ export function QuestionEditor({ question, quizId, presets, onChange }: Props) {
         />
       </label>
 
-      <SolutionReadout solution={question.solution} onClear={() => onChange({ solution: null })} />
+      <SolutionReadout solution={question.solution} onChange={onChange} />
     </div>
   );
 }
 
 // ── geo ──────────────────────────────────────────────────────────────────
+// Friendlier checkbox labels; the layer key (used in surface_meta) is unchanged.
+const LAYER_LABELS: Record<string, string> = { admin0_borders: "borders" };
+
 function geoMeta(presets: Record<string, Preset>, preset: string) {
   return { preset, bbox: presets[preset].bbox, layers: Object.keys(presets[preset].layers) };
 }
@@ -119,7 +122,7 @@ function GeoEditor({
           {available.map((l) => (
             <label key={l} className="flex items-center gap-1 text-xs">
               <input type="checkbox" checked={layers.includes(l)} onChange={() => toggleLayer(l)} />
-              {l}
+              {LAYER_LABELS[l] ?? l}
             </label>
           ))}
         </div>
@@ -222,28 +225,75 @@ function KindButton({
 
 function SolutionReadout({
   solution,
-  onClear,
+  onChange,
 }: {
   solution: SurfacePoint | null;
-  onClear: () => void;
+  onChange: (patch: Partial<QuizQuestion>) => void;
 }) {
   return (
     <div className="flex items-center gap-3 text-sm">
       <span className="font-semibold">Solution:</span>
-      {solution ? (
-        <>
-          <span className="font-mono">
-            {solution.kind === "geo"
-              ? `${solution.lat.toFixed(4)}, ${solution.lng.toFixed(4)}`
-              : `x ${solution.x.toFixed(3)}, y ${solution.y.toFixed(3)}`}
-          </span>
-          <button onClick={onClear} className="text-xs underline opacity-70">
-            clear
-          </button>
-        </>
-      ) : (
+      {!solution ? (
         <span className="opacity-60">not placed yet</span>
+      ) : solution.kind === "geo" ? (
+        <GeoSolutionFields sol={solution} onChange={onChange} />
+      ) : (
+        <span className="font-mono">
+          x {solution.x.toFixed(3)}, y {solution.y.toFixed(3)}
+        </span>
+      )}
+      {solution && (
+        <button onClick={() => onChange({ solution: null })} className="text-xs underline opacity-70">
+          clear
+        </button>
       )}
     </div>
+  );
+}
+
+// Editable lat/lng. Local buffers let you type freely (partial "-", "12.")
+// without the map click / re-format fighting the keystrokes.
+function GeoSolutionFields({
+  sol,
+  onChange,
+}: {
+  sol: { kind: "geo"; lat: number; lng: number };
+  onChange: (patch: Partial<QuizQuestion>) => void;
+}) {
+  const [lat, setLat] = useState(String(sol.lat));
+  const [lng, setLng] = useState(String(sol.lng));
+
+  // Resync from external changes (map click) unless the buffer already means it.
+  useEffect(() => {
+    if (parseFloat(lat) !== sol.lat) setLat(sol.lat.toFixed(4));
+    if (parseFloat(lng) !== sol.lng) setLng(sol.lng.toFixed(4));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sol.lat, sol.lng]);
+
+  function commit(nLat: string, nLng: string) {
+    const la = parseFloat(nLat);
+    const lo = parseFloat(nLng);
+    if (!Number.isNaN(la) && !Number.isNaN(lo)) onChange({ solution: { kind: "geo", lat: la, lng: lo } });
+  }
+
+  return (
+    <span className="flex items-center gap-1 font-mono">
+      <input
+        type="number"
+        step="any"
+        value={lat}
+        onChange={(e) => { setLat(e.target.value); commit(e.target.value, lng); }}
+        className="w-24 rounded border border-gunmetal/30 px-1"
+        aria-label="latitude"
+      />
+      <input
+        type="number"
+        step="any"
+        value={lng}
+        onChange={(e) => { setLng(e.target.value); commit(lat, e.target.value); }}
+        className="w-24 rounded border border-gunmetal/30 px-1"
+        aria-label="longitude"
+      />
+    </span>
   );
 }
