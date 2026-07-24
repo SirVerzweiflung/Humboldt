@@ -738,6 +738,13 @@ stop the retyping.
 - **Leave room** = device-only and deliberately low-key: returns this device to the code screen. The
   player still exists in the quiz.
 - **Only the host can truly remove a player** (kick → deletes the row and its score, a later RPC).
+- **Anti-griefing via device supersession.** `join_room` stamps `players.device_id` with the joining
+  device. Each in-room device watches its own player row (realtime + fetch); if `device_id` stops
+  being its `auth.uid()`, another device joined under that name → it **self-ejects** to a "someone
+  else joined as <name>" screen. The legit player thus instantly sees the intrusion, and **rejoining
+  reclaims the name** (re-stamps `device_id`), which in turn ejects the griefer. A row that vanished
+  = host kick → "removed" screen. `CONSTRAINT` This is last-writer-wins, not real auth — sufficient
+  for a known group.
 - **Back-button safety** (`CONSTRAINT` iOS/Android back can dump an SPA to a blank page): the in-room
   screen pushes a history guard and, on back, routes to the **code screen prefilled** with the last
   room (`player_last_room` in `localStorage`) rather than out of the app — and since the name is

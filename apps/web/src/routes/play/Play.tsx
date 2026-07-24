@@ -1,10 +1,12 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { RoleBadge } from "../../shared/RoleBadge";
 import { supabase, ensureAnonAuth } from "../../lib/supabase";
 import { getRoomByCode, type Room } from "../../lib/room";
-import { joinRoom, savedName, lastRoom, type Player } from "../../lib/player";
+import { joinRoom, fetchPlayerDevice, savedName, lastRoom, type Player } from "../../lib/player";
 import { errMsg } from "../../lib/errMsg";
+
+type KickReason = "superseded" | "removed";
 
 export function Play() {
   const [params] = useSearchParams();
@@ -52,13 +54,15 @@ function EnterCode() {
 }
 
 // ── room gate: resolve room → name/confirm → in-room ────────────────────────
-type Phase = "loading" | "error" | "need-name" | "confirm" | "in-room";
+type Phase = "loading" | "error" | "need-name" | "confirm" | "in-room" | "kicked";
 
 function RoomGate({ code }: { code: string }) {
+  const navigate = useNavigate();
   const [room, setRoom] = useState<Room | null>(null);
   const [player, setPlayer] = useState<Player | null>(null);
   const [phase, setPhase] = useState<Phase>("loading");
   const [error, setError] = useState<string | null>(null);
+  const [kickReason, setKickReason] = useState<KickReason>("superseded");
 
   useEffect(() => {
     let cancelled = false;
@@ -114,6 +118,11 @@ function RoomGate({ code }: { code: string }) {
     setPhase("need-name");
   }
 
+  const onKicked = useCallback((reason: KickReason) => {
+    setKickReason(reason);
+    setPhase("kicked");
+  }, []);
+
   if (phase === "loading") return <p className="opacity-70">Joining {code}…</p>;
   if (phase === "error")
     return <p className="rounded bg-pink px-3 py-2 text-sm text-gunmetal">{error}</p>;
@@ -126,8 +135,19 @@ function RoomGate({ code }: { code: string }) {
   if (phase === "need-name")
     return <NameEntry code={code} onJoin={join} error={error} />;
 
+  if (phase === "kicked")
+    return (
+      <KickedScreen
+        reason={kickReason}
+        name={savedName.get()}
+        onRejoin={() => join(savedName.get())}
+        onCode={() => navigate("/play")}
+        error={error}
+      />
+    );
+
   // in-room
-  return <InRoom room={room!} player={player!} onLogout={logout} />;
+  return <InRoom room={room!} player={player!} onLogout={logout} onKicked={onKicked} />;
 }
 
 function ConfirmJoin({
@@ -199,8 +219,60 @@ function NameEntry({
   );
 }
 
-function InRoom({ room, player, onLogout }: { room: Room; player: Player; onLogout: () => void }) {
+function InRoom({
+  room,
+  player,
+  onLogout,
+  onKicked,
+}: {
+  room: Room;
+  player: Player;
+  onLogout: () => void;
+  onKicked: (reason: KickReason) => void;
+}) {
   const navigate = useNavigate();
+
+  // Anti-griefing: watch our own player row. If device_id stops being this device,
+  // another device joined under our name → eject (they can rejoin to reclaim, which
+  // in turn kicks the other). If the row vanished, the host removed us.
+  useEffect(() => {
+    let cancelled = false;
+    let myUid = "";
+
+    const check = async () => {
+      const dev = await fetchPlayerDevice(player.id);
+      if (cancelled) return;
+      if (dev === undefined) return onKicked("removed");
+      if (dev && myUid && dev !== myUid) onKicked("superseded");
+    };
+
+    (async () => {
+      myUid = await ensureAnonAuth();
+      await check();
+    })();
+
+    const channel = supabase
+      .channel(`player:${player.id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "players", filter: `id=eq.${player.id}` },
+        () => check(),
+      )
+      .subscribe((s) => {
+        if (s === "SUBSCRIBED") check();
+      });
+
+    const onVis = () => {
+      if (document.visibilityState === "visible") check();
+    };
+    document.addEventListener("visibilitychange", onVis);
+
+    return () => {
+      cancelled = true;
+      supabase.removeChannel(channel);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, [player.id, onKicked]);
 
   // Back-button safety: the phone "back" must not throw the player out of the app
   // to a blank/unintended page. Push a guard entry; when back is pressed, send them
@@ -233,6 +305,45 @@ function InRoom({ room, player, onLogout }: { room: Room; player: Player; onLogo
           log out ({player.nickname})
         </button>
       </div>
+    </div>
+  );
+}
+
+function KickedScreen({
+  reason,
+  name,
+  onRejoin,
+  onCode,
+  error,
+}: {
+  reason: KickReason;
+  name: string;
+  onRejoin: () => void;
+  onCode: () => void;
+  error: string | null;
+}) {
+  return (
+    <div className="flex flex-col items-center gap-4 text-center">
+      {reason === "superseded" ? (
+        <>
+          <p className="text-xl font-bold">Someone else joined as “{name}”.</p>
+          <p className="opacity-70">You were signed out on this device.</p>
+          {name && (
+            <button
+              onClick={onRejoin}
+              className="rounded-lg bg-white px-6 py-3 text-lg font-semibold text-gunmetal"
+            >
+              Rejoin as {name} (removes the other device)
+            </button>
+          )}
+        </>
+      ) : (
+        <p className="text-xl font-bold">The host removed you from the quiz.</p>
+      )}
+      <button onClick={onCode} className="text-sm underline opacity-70">
+        back to code screen
+      </button>
+      {error && <p className="rounded bg-pink px-3 py-2 text-sm text-gunmetal">{error}</p>}
     </div>
   );
 }
