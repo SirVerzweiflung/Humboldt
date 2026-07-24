@@ -198,12 +198,16 @@ round_solutions                     -- SECRET: host-only. Separate table = simpl
   label     text                    -- "Rome", "the third window from the left"
 
 -- ── people ───────────────────────────────────────────────────────────────
+-- Identity is the NAME within a room, NOT the device (revised from the original
+-- id==auth.uid() design). Same name in a room = same player, so a dead phone can
+-- be continued from another device by re-typing the name. See §9 "player join".
 players
-  id          uuid pk               -- == auth.uid() (anonymous auth)
+  id          uuid pk default gen_random_uuid()
   room_id     uuid references rooms on delete cascade
   nickname    text not null
+  device_id   uuid                  -- last auth.uid() that claimed this name (informational)
   joined_at   timestamptz default now()
-  unique (room_id, lower(nickname))
+  unique (room_id, lower(nickname))  -- expression unique index; used by join_room ON CONFLICT
 
 -- ── play ─────────────────────────────────────────────────────────────────
 answers
@@ -250,17 +254,23 @@ things are actually protected:
 1. **The solution must not leak before reveal.** `round_solutions` is readable **only** by
    `rooms.host_id`. Players and the Board never query it; they read `rounds.revealed_solution`,
    which is `NULL` until the host publishes it.
-2. **Answers must not leak before reveal.** `answers` select policy:
-   `player_id = auth.uid()` **OR** `revealed_at is not null` **OR** requester is the room's
-   `host_id`. That single policy gives the host their live incoming-answer view for free.
+2. **Answers must not leak before reveal.** `answers` select policy: `revealed_at is not null`
+   **OR** requester is the room's `host_id`. (The original "`player_id = auth.uid()`" clause no
+   longer works — a player is a *name*, not a device, so a device may not equal its player. Since a
+   player can already be continued from any device by name, "hide your own unrevealed answer from
+   yourself" buys nothing here; drop it. `CONSTRAINT` party game, §3.) `OPEN`: if we still want a
+   player to see their own pin pre-reveal, do it client-side from local state, not via RLS.
 
 Everything else is convenience-grade:
 
-- `answers` insert: `player_id = auth.uid()` and the round's room is in phase `answering` and
-  `closed_at is null`. Enforce "one pin per player" with the unique constraint, and allow
-  `update` of an unrevealed own answer if we want "change your mind" (`OPEN` — I'd allow it).
+- **`players` are written only via `join_room(code, nickname)`** — a `SECURITY DEFINER` RPC that
+  upserts by `(room_id, lower(nickname))` and returns the row (creating it, or continuing an existing
+  name). No direct client insert/update; roster `select` is public. Host **kick** is a later RPC that
+  deletes the row (removing the score). See §9.
+- `answers` insert: phase is `answering` and `closed_at is null`; "one pin per player" via the unique
+  constraint. Because the writer's device ≠ player identity, answer writes also go through an RPC that
+  takes the player id (mirrors `join_room`). `OPEN`: allow `update` of an unrevealed own answer.
 - `rooms`, `rounds`, `round_solutions`, `score_events` writes: `host_id = auth.uid()` only.
-- `players` insert: `id = auth.uid()`.
 - Auth: `supabase.auth.signInAnonymously()`, session persisted in `localStorage` so a reload or a
   locked screen rejoins as the same person rather than creating a duplicate player.
 
@@ -710,6 +720,29 @@ Host recovery is deliberately low-security:
 - Only one host at a time. The previous host device, on its next write, gets an RLS failure → show
   "another device took over as host" rather than a raw error.
 - The Board and players do not care who the host is; they only read room state.
+
+### Player join, name-as-identity, and recovery
+
+Players never see a login. Identity is the **name within the room** (§3): `join_room(code, name)`
+upserts by name and returns the player, so re-typing the same name on any device continues the same
+player (same score). No passwords — the group knows each other (`CONSTRAINT`, party game). The whole
+point of saving the name on the device is that people picked names they then mistyped; store it once,
+stop the retyping.
+
+- **On the phone, `/play`** (`?room=CODE` from the QR, or code typed in): resolve the room, then:
+  - saved name **and** this is the room we were last in → **auto sign back in** (silent `join_room`);
+  - saved name, different room → a **"Join as <name>"** confirm with a **"not you? log out"** link;
+  - no saved name → a **name field** + Join.
+- **Log out** = device-only: clears the saved name so a new name can be set. It does **not** remove
+  the player from the quiz or touch the score.
+- **Leave room** = device-only and deliberately low-key: returns this device to the code screen. The
+  player still exists in the quiz.
+- **Only the host can truly remove a player** (kick → deletes the row and its score, a later RPC).
+- **Back-button safety** (`CONSTRAINT` iOS/Android back can dump an SPA to a blank page): the in-room
+  screen pushes a history guard and, on back, routes to the **code screen prefilled** with the last
+  room (`player_last_room` in `localStorage`) rather than out of the app — and since the name is
+  saved, re-entering the room auto-signs them back in. `localStorage`: `player_name` (cleared on log
+  out), `player_last_room` (for prefill/recovery).
 
 ---
 
