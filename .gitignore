@@ -11,6 +11,9 @@ dist/
 .branches/
 .temp/
 
+# image uploads written by server/upload (dev: repo-root/public/uploads)
+public/uploads/
+
 # map pipeline: raw Natural Earth downloads + scratch (tools/geo). Only the
 # built output under public/geo/ is committed.
 tools/geo/sources/

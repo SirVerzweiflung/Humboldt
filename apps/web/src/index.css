@@ -2,11 +2,25 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Project palette (CLAUDE.md §15). Only these + white text are allowed. */
+:root {
+  --wheat: #ebd1ad;
+  --palm: #93914d;
+  --gunmetal: #424242; /* the only dark colour — all dark text uses this */
+  --pacific: #5296a5;
+  --pink: #f8a0cb;
+}
+
 html,
 body,
 #root {
   height: 100%;
   margin: 0;
+}
+
+/* Default text colour is the palette's dark, never pure black. */
+body {
+  color: var(--gunmetal);
 }
 
 /* Kill pull-to-refresh; surface gestures handled per-component later (CLAUDE.md §11.3). */

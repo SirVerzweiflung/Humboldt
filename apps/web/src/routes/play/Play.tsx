@@ -9,7 +9,7 @@ export function Play() {
   const code = params.get("room");
 
   return (
-    <main className="flex h-full flex-col items-center justify-center gap-6 bg-emerald-700 p-6 text-white">
+    <main className="flex h-full flex-col items-center justify-center gap-6 bg-palm p-6 text-white">
       <RoleBadge label="/play" />
       {code ? <InRoom code={code.toUpperCase()} /> : <EnterCode />}
     </main>
@@ -35,11 +35,11 @@ function EnterCode() {
         placeholder="ABC123"
         maxLength={6}
         autoFocus
-        className="w-56 rounded-lg bg-white px-4 py-3 text-center font-mono text-3xl tracking-widest text-emerald-800"
+        className="w-56 rounded-lg bg-white px-4 py-3 text-center font-mono text-3xl tracking-widest text-gunmetal"
       />
       <button
         disabled={value.length < 6}
-        className="rounded-lg bg-white px-6 py-3 text-lg font-semibold text-emerald-700 disabled:opacity-50"
+        className="rounded-lg bg-white px-6 py-3 text-lg font-semibold text-gunmetal disabled:opacity-50"
       >
         Join
       </button>
@@ -64,7 +64,7 @@ function InRoom({ code }: { code: string }) {
     })();
   }, [code]);
 
-  if (error) return <p className="rounded bg-red-600 px-3 py-2 text-sm">{error}</p>;
+  if (error) return <p className="rounded bg-pink px-3 py-2 text-sm text-gunmetal">{error}</p>;
   if (!room) return <p className="opacity-70">Joining {code}…</p>;
 
   return (
@@ -111,12 +111,12 @@ function DummySender({ roomId }: { roomId: string }) {
       <button
         onClick={send}
         disabled={sending}
-        className="rounded-lg bg-white px-8 py-4 text-xl font-semibold text-emerald-700 disabled:opacity-50"
+        className="rounded-lg bg-white px-8 py-4 text-xl font-semibold text-gunmetal disabled:opacity-50"
       >
         Send dummy data
       </button>
       <p className="text-sm opacity-70">Next counter: {counter + 1}</p>
-      {error && <p className="rounded bg-red-600 px-3 py-2 text-sm">{error}</p>}
+      {error && <p className="rounded bg-pink px-3 py-2 text-sm text-gunmetal">{error}</p>}
     </div>
   );
 }

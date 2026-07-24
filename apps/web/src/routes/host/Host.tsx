@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { RoleBadge } from "../../shared/RoleBadge";
 import { supabase, ensureAnonAuth } from "../../lib/supabase";
 import { createRoom, claimRoom, getRoomByCode, type Room } from "../../lib/room";
@@ -71,11 +72,18 @@ export function Host() {
   }
 
   return (
-    <main className="flex h-full flex-col items-center gap-6 overflow-y-auto bg-indigo-700 p-6 text-white">
+    <main className="flex h-full flex-col items-center gap-6 overflow-y-auto bg-pacific p-6 text-white">
       <RoleBadge label="/host" />
       <h1 className="text-3xl font-bold">Host</h1>
 
-      {error && <p className="rounded bg-red-600 px-3 py-2 text-sm">{error}</p>}
+      <Link
+        to="/quiz"
+        className="rounded-lg bg-white/20 px-4 py-2 text-sm font-semibold underline-offset-2 hover:underline"
+      >
+        Create / edit a quiz →
+      </Link>
+
+      {error && <p className="rounded bg-pink px-3 py-2 text-sm text-gunmetal">{error}</p>}
 
       {restoring ? (
         <p className="opacity-70">Restoring…</p>
@@ -118,7 +126,7 @@ function StartScreen({
       <button
         onClick={onCreate}
         disabled={busy}
-        className="rounded-lg bg-white px-6 py-3 text-lg font-semibold text-indigo-700 disabled:opacity-50"
+        className="rounded-lg bg-white px-6 py-3 text-lg font-semibold text-gunmetal disabled:opacity-50"
       >
         {busy ? "Working…" : "Create room"}
       </button>
@@ -137,7 +145,7 @@ function StartScreen({
             onChange={(e) => setCode(e.target.value.toUpperCase())}
             placeholder="ABC123"
             maxLength={6}
-            className="w-40 rounded-lg bg-white px-3 py-2 text-center font-mono text-xl tracking-widest text-indigo-800"
+            className="w-40 rounded-lg bg-white px-3 py-2 text-center font-mono text-xl tracking-widest text-gunmetal"
           />
           <button
             disabled={busy || code.trim().length < 6}

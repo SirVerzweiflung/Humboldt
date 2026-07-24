@@ -97,22 +97,27 @@ real file.
 ├── pnpm-workspace.yaml        ← globs apps/* (packages/* added when needed) [now]
 ├── .gitignore                 ← node_modules, dist, .env*, .devserver.*    [now]
 ├── scripts/
-│   ├── start.sh               ← detached vite dev server (setsid group)    [now]
+│   ├── start.sh               ← detached vite + upload service (setsid group) [now]
 │   └── stop.sh                ← kills the whole process group              [now]
+├── server/upload/            ← self-hosted image upload service (§4/§10)   [now]
+│   └── index.mjs              ← zero-dep Node; POST /api/upload, token-gated
 ├── apps/web/
 │   ├── index.html                                                          [now]
-│   ├── vite.config.ts         ← host:true (LAN), port 5173                 [now]
+│   ├── vite.config.ts         ← host:true (LAN), :5173, proxies /api/upload [now]
 │   ├── tailwind.config.js · postcss.config.js · tsconfig.json             [now]
-│   ├── .env                   ← VITE_SUPABASE_* (gitignored, see §10.4)    [planned]
-│   ├── .env.example           ← committed template of the above           [planned]
+│   ├── .env                   ← VITE_SUPABASE_* / TURNSTILE / UPLOAD (gitignored) [now]
+│   ├── .env.example           ← committed template of the above           [now]
 │   └── src/
-│       ├── main.tsx           ← router: / → /board, /play /host /board    [now]
+│       ├── main.tsx           ← router (React.lazy per route) + AuthGate   [now]
 │       ├── index.css          ← tailwind directives + touch resets        [now]
-│       ├── shared/            ← in-app shared React components (RoleBadge) [now]
+│       ├── lib/               ← supabase, room, quiz(RPC), quizSchema(zod), geo, upload [now]
+│       ├── surface/           ← GeoSurface (MapLibre) + ImageSurface (pan/zoom) [now]
+│       ├── shared/            ← AuthGate, RoleBadge                        [now]
 │       │                        promote to packages/ui only if a 2nd app appears
 │       └── routes/
 │           ├── {play,host,board}/                                        [now]
-│           └── quiz/            ← quiz editor (create/edit by quizcode, §4) [planned]
+│           └── quiz/            ← quiz editor (create/edit by quizcode, §4) [now]
+│   note: apps/web/vite.config.ts sets publicDir → repo-root/public (below)
 ├── packages/                  ← added incrementally; NOT scaffolded yet    [planned]
 │   ├── protocol/              ← shared types, PROTOCOL_VERSION, quiz zod schema
 │   ├── supabase/              ← typed client, generated DB types, channel helpers
@@ -120,14 +125,16 @@ real file.
 │   └── ui/                    ← only if shared/ needs to cross app boundaries
 ├── supabase/
 │   ├── config.toml            ← project_id = project ref (§10.2)           [now]
-│   ├── migrations/            ← deployed by the GitHub integration (§10)   [now: 0001 rooms]
+│   ├── migrations/            ← deployed by the GitHub integration (§10)   [now: 0001–0004]
 │   └── seed.sql                                                            [planned]
 ├── tools/geo/                 ← offline map asset pipeline (§6.3)          [now]
 │   ├── MAP_CREATION.md        ← how to run it, and what will bite you      [now]
 │   ├── build.mjs              ← shapefiles → per-preset hashed TopoJSON    [now]
 │   ├── presets.json           ← build-time preset catalogue (§6.4)         [now]
 │   └── sources/               ← unzipped Natural Earth downloads (gitignored) [local]
-└── public/geo/                ← built TopoJSON layers + manifest.json      [now]
+└── public/                    ← Vite publicDir (apps/web serves from here)
+    ├── geo/                   ← built TopoJSON layers + manifest.json      [now]
+    └── uploads/               ← images written by server/upload (gitignored) [dev]
 ```
 
 **Deliberate deviations from the original sketch:**
@@ -310,8 +317,8 @@ is unacceptable. Resolution:
 - The quizcode is unguessable (≈120 bits); brute-forcing the RPC is the only attack surface and this
   is a party game (`CONSTRAINT`, §3 philosophy). Add basic rate-limiting later if it ever matters
   (`OPEN`).
-- Images referenced by a quiz live in Storage exactly as in §4 (bucket `quiz-assets`, unguessable
-  paths); they are uploaded during authoring, not at room creation.
+- Images referenced by a quiz live on our **self-hosted upload service**, not Supabase (§4);
+  `surface_ref` stores a relative `/uploads/…` URL. Uploaded during authoring, not at room creation.
 
 ---
 
@@ -349,16 +356,27 @@ no files).
   error list ("question 3: no solution placed"). Editor state is client-side; **explicit Save** calls
   `quiz_save(quizcode, payload)` (autosave is `OPEN`).
 
-### Images → Supabase Storage
+### Images → self-hosted upload service (NOT Supabase)
 
-- Bucket `quiz-assets`, path `quizzes/{quiz_id}/{uuid}.{ext}` (was `rooms/{room_id}/…` when quizzes
-  were room-scoped; they are now quiz-scoped). `surface_ref` holds the storage path; random UUID
+`CONSTRAINT` Images are stored on **our own box**, never Supabase Storage — to save Supabase egress
+(images are served to every phone each round; Cloudflare edge-caches our origin for ~free). Supabase
+holds only the *path*, not the bytes.
+
+- Small zero-dependency Node service `server/upload/` (CLAUDE.md §10.3): `POST /api/upload?quiz=<id>`
+  with header `X-Upload-Token` and raw image bytes → writes the file and returns a **relative** URL
+  `/uploads/quizzes/{quiz_id}/{uuid}.{ext}`. `surface_ref` stores that relative URL; random UUID
   filenames so nobody guesses another question's picture from a URL pattern.
-- Downscale client-side to max ~2000 px long edge and re-encode to WebP/JPEG before upload. Free tier
-  is 1 GB storage / 5 GB egress; ~300 KB each is fine, careless 8 MB phone photos are not.
-- Bucket is public-read with unguessable paths (`OPEN`: signed URLs if that ever feels too loose).
-- Room creation does **not** re-upload; the snapshot's `surface_ref` points at the same Storage
-  object, shared by every room spawned from the quiz.
+- The client **downscales to ~2000 px long edge and re-encodes to WebP** (canvas) *before* upload, so
+  the service stays dumb (no image libs) and careless 8 MB phone photos never hit disk.
+- **Token-gated** (`VITE_UPLOAD_TOKEN` client ↔ `UPLOAD_TOKEN` server, §10.4) so the public tunnel
+  can't be used to fill the disk. The service refuses to start without a token.
+- **Dev:** `scripts/start.sh` runs the service on `:8787`; Vite proxies `/api/upload` to it and serves
+  the written files straight from `apps/web/public/uploads/` (gitignored). **Prod:** the service runs
+  on the Debian box behind Caddy, writing to a Caddy-served `/uploads` dir (§10.3).
+- Room creation does **not** re-upload; the snapshot's `surface_ref` points at the same file, shared
+  by every room spawned from the quiz.
+- `OPEN`: the images are effectively public at an unguessable URL. Fine for a party game (§3). Signed
+  URLs / auth on `/uploads` later if it ever matters.
 
 ### Backup
 
@@ -767,6 +785,12 @@ two required client vars are:
 | `VITE_SUPABASE_URL` | Supabase → Settings → API → Project URL, `https://<ref>.supabase.co` | yes |
 | `VITE_SUPABASE_ANON_KEY` | Supabase → Settings → API → Project API keys → `anon` `public` | yes |
 | `VITE_TURNSTILE_SITE_KEY` | Cloudflare Turnstile → widget → **Site Key** (public) | yes |
+| `VITE_UPLOAD_TOKEN` | shared secret for the image upload service; must equal the server's `UPLOAD_TOKEN` | yes |
+
+Server-side (never in the bundle): the upload service reads `UPLOAD_TOKEN`, `UPLOAD_PORT` (8787),
+and `UPLOAD_DIR`. In dev, `scripts/start.sh` copies `VITE_UPLOAD_TOKEN` into `UPLOAD_TOKEN` so the two
+match automatically. Note `VITE_UPLOAD_TOKEN` is *not* a Supabase-style secret — it only guards disk
+writes, and it necessarily ships in the client; treat it as a spam-gate, not real auth.
 
 **CAPTCHA (Cloudflare Turnstile).** Anonymous sign-in is CAPTCHA-protected in Supabase Auth
 (Auth → Attack Protection). So `signInAnonymously({ options: { captchaToken } })` needs a token from a

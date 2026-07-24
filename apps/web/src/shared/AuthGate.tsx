@@ -35,7 +35,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
   if (phase === "ready") return <>{children}</>;
 
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-4 bg-slate-800 p-6 text-white">
+    <div className="flex h-full flex-col items-center justify-center gap-4 bg-gunmetal p-6 text-white">
       {phase === "checking" && <p className="opacity-70">Loading…</p>}
       {phase === "captcha" &&
         (siteKey ? (
@@ -50,11 +50,11 @@ export function AuthGate({ children }: { children: ReactNode }) {
             />
           </>
         ) : (
-          <p className="rounded bg-red-600 px-3 py-2 text-sm">
+          <p className="rounded bg-pink px-3 py-2 text-sm text-gunmetal">
             Missing VITE_TURNSTILE_SITE_KEY in apps/web/.env
           </p>
         ))}
-      {error && <p className="rounded bg-red-600 px-3 py-2 text-sm">{error}</p>}
+      {error && <p className="rounded bg-pink px-3 py-2 text-sm text-gunmetal">{error}</p>}
     </div>
   );
 }
