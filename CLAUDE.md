@@ -114,7 +114,12 @@ real file.
 │   ├── config.toml            ← project_id = project ref (§10.2)           [now]
 │   ├── migrations/            ← deployed by the GitHub integration (§10)   [now: 0001 rooms]
 │   └── seed.sql                                                            [planned]
-└── public/geo/                ← TopoJSON/GeoJSON layer assets (§6.3)       [planned]
+├── tools/geo/                 ← offline map asset pipeline (§6.3)          [now]
+│   ├── MAP_CREATION.md        ← how to run it, and what will bite you      [now]
+│   ├── build.mjs              ← shapefiles → per-preset hashed TopoJSON    [now]
+│   ├── presets.json           ← build-time preset catalogue (§6.4)         [now]
+│   └── sources/               ← unzipped Natural Earth downloads (gitignored) [local]
+└── public/geo/                ← built TopoJSON layers + manifest.json      [now]
 ```
 
 **Deliberate deviations from the original sketch:**
@@ -449,17 +454,27 @@ ODbL, so attribution + share-alike). **GADM** is finer still but **non-commercia
 avoid. **Wikimedia blank SVGs** have no coordinates, so distances degrade to pixels — that's what
 image mode is for, don't fake it with a map.
 
-Pipeline, run offline and committed:
+**The pipeline is implemented in [`tools/geo/`](tools/geo/)** — run offline, output committed, nothing
+executes at request time. `MAP_CREATION.md` there is the operator's guide (which files to download,
+how to run it, the gotchas); the summary:
 
-1. Download the Natural Earth shapefile for the layer + scale.
-2. `mapshaper -clip bbox=… -simplify 5% visvalingam -filter-fields NAME -o format=topojson`
-   Simplify aggressively; a quiz map wants *fewer* squiggles.
-3. Output to `public/geo/{preset}/{layer}.{detail}.topo.json`.
-4. Expand with `topojson-client` at runtime (TopoJSON is 5–10× smaller on the wire because it
-   dedupes shared borders).
-5. **Budget: ≤300 KB gzip per round's total layer set on the phone.** If over, simplify harder,
-   drop to a coarser scale, or clip tighter.
-6. Hash into the filename, serve `Cache-Control: public, max-age=31536000, immutable`, brotli on.
+1. Drop the Natural Earth `.zip`s into `tools/geo/sources/` and unzip each into its own folder
+   (gitignored — see the one-liner in `MAP_CREATION.md`).
+2. `node tools/geo/build.mjs [preset…] [--clean]`. Per preset, per layer it runs mapshaper:
+   focus-country filter → drop all attributes (`-filter-fields`: **names are the answer**) →
+   `-clip` to the preset bbox → `-simplify … visvalingam keep-shapes` → `-clean` (polygons) →
+   optional `-lines` → TopoJSON. Layer catalogue and each layer's Natural Earth source live in
+   `LAYERS` in `build.mjs`; per-preset knobs (detail/simplify/precision/river+lakeRank/layers/bbox
+   or `bboxFrom`) live in `presets.json`.
+3. Output: `public/geo/{preset}/{layer}.{detail}.{hash8}.topo.json` + `public/geo/manifest.json`.
+   **`manifest.json` is the only file the app loads by name**; everything else is content-hashed, so
+   `Cache-Control: public, max-age=31536000, immutable` + brotli is safe with no cache purge ever.
+   Expand TopoJSON with `topojson-client` at runtime (5–10× smaller on the wire — it dedupes shared
+   borders).
+4. **Budget: ≤300 KB gzip per round's total layer set on the phone.** The script prints gzipped
+   per-preset totals and warns over budget. If over: lower river/lakeRank, simplify harder, drop to a
+   coarser scale, or clip tighter. (Current `world`/`europe`/`austria` sets are all ≈8–21 KB gzip —
+   far under.)
 
 Never fetch map data from a third-party CDN at runtime. A CDN hiccup on quiz night kills the game.
 Self-host everything (§10).
@@ -467,9 +482,19 @@ Self-host everything (§10).
 ### 6.4 Presets
 
 A "preset" bundles a bbox, a default detail scale, and a default layer set:
-`world`, `europe`, `germany`, `alps`, … Defined in `packages/protocol/presets.ts` so the quiz file
-can just say `"preset": "europe"`. `surface_meta` on the round stores the resolved layer list and
-bbox, so a room stays reproducible even if presets change later.
+`world`, `europe`, `austria`, … so the quiz file can just say `"preset": "europe"`. There are two
+sides to a preset and they must not be confused:
+
+- **Build-time catalogue — `tools/geo/presets.json`** (§6.3). The source of truth the asset pipeline
+  reads to decide what to clip/simplify/emit. Editing this + re-running `build.mjs` is how a preset
+  gains or loses layers.
+- **Runtime — `public/geo/manifest.json`.** The build writes the *resolved* bbox + hashed layer URLs
+  here; this is what the client actually loads. So a client never reads `presets.json`.
+
+The quiz zod schema (`packages/protocol`, `[planned]`) still owns the enum of valid preset *ids* for
+upload validation — keep that list in step with `presets.json`. `surface_meta` on the round stores
+the resolved layer list and bbox at upload time, so a room stays reproducible even if presets change
+later.
 
 ---
 

@@ -10,6 +10,11 @@
     "stop": "./scripts/stop.sh"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["esbuild"]
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  },
+  "devDependencies": {
+    "mapshaper": "^0.7.47"
   }
 }

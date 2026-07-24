@@ -1,0 +1,48 @@
+{
+  "$comment": [
+    "Preset catalogue for the map quiz. Edit this file, re-run `node tools/geo/build.mjs`,",
+    "commit the output. Nothing here is read at runtime — the build emits public/geo/manifest.json,",
+    "which is what the app loads.",
+    "",
+    "detail      : which Natural Earth scale to pull source files from (110m | 50m | 10m)",
+    "bbox        : [west, south, east, north] in degrees. Omit to use bboxFrom.",
+    "bboxFrom    : derive the bbox from a country polygon (see below). padDeg widens it.",
+    "simplify    : mapshaper vertex-retention percentage. Lower = fewer squiggles = smaller.",
+    "precision   : coordinate rounding in degrees. 0.001 ~= 111 m. 0.0005 ~= 55 m.",
+    "riverRank   : keep rivers with scalerank <= this. Higher = more, smaller rivers.",
+    "lakeRank    : keep lakes with scalerank <= this.",
+    "layers      : which layer keys to build. See LAYERS in build.mjs for the catalogue.",
+    "focus       : required only if a layer uses the 'focus' key or bboxFrom."
+  ],
+
+  "world": {
+    "detail": "110m",
+    "bbox": [-180, -60, 180, 84],
+    "simplify": "20%",
+    "precision": 0.01,
+    "riverRank": 4,
+    "lakeRank": 2,
+    "layers": ["land", "coastline", "admin0_borders", "rivers", "lakes"]
+  },
+
+  "europe": {
+    "detail": "50m",
+    "bbox": [-25, 33, 45, 72],
+    "simplify": "15%",
+    "precision": 0.005,
+    "riverRank": 6,
+    "lakeRank": 4,
+    "layers": ["land", "coastline", "admin0_borders", "rivers", "lakes"]
+  },
+
+  "austria": {
+    "detail": "10m",
+    "bboxFrom": { "field": "NAME", "value": "Austria", "padDeg": 0.7 },
+    "focus": { "field": "NAME", "value": "Austria" },
+    "simplify": "25%",
+    "precision": 0.0005,
+    "riverRank": 8,
+    "lakeRank": 8,
+    "layers": ["admin0_borders", "focus", "rivers", "lakes"]
+  }
+}

@@ -1,0 +1,108 @@
+{
+  "generatedAt": "2026-07-24T08:10:46.729Z",
+  "presets": {
+    "world": {
+      "detail": "110m",
+      "bbox": [
+        -180,
+        -60,
+        180,
+        84
+      ],
+      "layers": {
+        "land": {
+          "url": "/geo/world/land.110m.b51f838c.topo.json",
+          "bytes": 19183,
+          "gzipBytes": 6416
+        },
+        "coastline": {
+          "url": "/geo/world/coastline.110m.cc2f50e1.topo.json",
+          "bytes": 15413,
+          "gzipBytes": 5196
+        },
+        "admin0_borders": {
+          "url": "/geo/world/admin0_borders.110m.9d24d76c.topo.json",
+          "bytes": 25623,
+          "gzipBytes": 6469
+        },
+        "rivers": {
+          "url": "/geo/world/rivers.110m.e8b60190.topo.json",
+          "bytes": 3160,
+          "gzipBytes": 1285
+        },
+        "lakes": {
+          "url": "/geo/world/lakes.110m.3d232725.topo.json",
+          "bytes": 2542,
+          "gzipBytes": 933
+        }
+      }
+    },
+    "europe": {
+      "detail": "50m",
+      "bbox": [
+        -25,
+        33,
+        45,
+        72
+      ],
+      "layers": {
+        "land": {
+          "url": "/geo/europe/land.50m.5192e26b.topo.json",
+          "bytes": 22107,
+          "gzipBytes": 6820
+        },
+        "coastline": {
+          "url": "/geo/europe/coastline.50m.c56c0d87.topo.json",
+          "bytes": 15024,
+          "gzipBytes": 4730
+        },
+        "admin0_borders": {
+          "url": "/geo/europe/admin0_borders.50m.e20443d5.topo.json",
+          "bytes": 12371,
+          "gzipBytes": 3649
+        },
+        "rivers": {
+          "url": "/geo/europe/rivers.50m.6f558a08.topo.json",
+          "bytes": 9860,
+          "gzipBytes": 3153
+        },
+        "lakes": {
+          "url": "/geo/europe/lakes.50m.fb3b8570.topo.json",
+          "bytes": 8112,
+          "gzipBytes": 2597
+        }
+      }
+    },
+    "austria": {
+      "detail": "10m",
+      "bbox": [
+        8.8212,
+        45.6786,
+        17.8483,
+        49.7098
+      ],
+      "layers": {
+        "admin0_borders": {
+          "url": "/geo/austria/admin0_borders.10m.5bececc8.topo.json",
+          "bytes": 11551,
+          "gzipBytes": 4454
+        },
+        "focus": {
+          "url": "/geo/austria/focus.10m.56c5076a.topo.json",
+          "bytes": 2985,
+          "gzipBytes": 1320
+        },
+        "rivers": {
+          "url": "/geo/austria/rivers.10m.3b9fa331.topo.json",
+          "bytes": 4411,
+          "gzipBytes": 1733
+        },
+        "lakes": {
+          "url": "/geo/austria/lakes.10m.b88227f3.topo.json",
+          "bytes": 863,
+          "gzipBytes": 436
+        }
+      }
+    }
+  }
+}

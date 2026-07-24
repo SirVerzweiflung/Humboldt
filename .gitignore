@@ -11,6 +11,11 @@ dist/
 .branches/
 .temp/
 
+# map pipeline: raw Natural Earth downloads + scratch (tools/geo). Only the
+# built output under public/geo/ is committed.
+tools/geo/sources/
+tools/geo/.tmp/
+
 # env
 .env
 .env.*
