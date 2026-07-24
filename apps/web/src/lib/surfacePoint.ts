@@ -14,3 +14,12 @@ export type ImageMeta = {
   natural_height: number;
   fit: "contain";
 };
+
+// A coloured marker on a surface (player answer, or the solution).
+export type SurfacePin = {
+  id: string;
+  point: SurfacePoint;
+  color: string;
+  label?: string;
+  solution?: boolean; // rendered distinctly (shape + ring), not just colour (§8)
+};

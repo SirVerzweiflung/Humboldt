@@ -132,7 +132,7 @@ function GeoEditor({
         <GeoSurface
           preset={preset}
           layers={layers}
-          solution={question.solution}
+          pins={question.solution ? [{ id: "sol", point: question.solution, color: "#f8a0cb", solution: true }] : []}
           onPick={(p: SurfacePoint) => onChange({ solution: p })}
         />
       </div>
@@ -191,7 +191,7 @@ function ImageEditor({
           <div className="h-[45vh] w-full overflow-hidden rounded border border-gunmetal/30">
             <ImageSurface
               src={question.surface_ref}
-              solution={question.solution}
+              pins={question.solution ? [{ id: "sol", point: question.solution, color: "#f8a0cb", solution: true }] : []}
               onPick={(p: SurfacePoint) => onChange({ solution: p })}
             />
           </div>

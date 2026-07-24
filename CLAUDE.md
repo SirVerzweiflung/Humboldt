@@ -56,6 +56,14 @@ ended       – final leaderboard on Board, JSON/CSV export on Host
 Everything is host-triggered. There are no automatic timers on the critical path. A countdown is
 optional per round and purely cosmetic (`OPEN`).
 
+**Implementation note (as built).** The live `rooms.phase` enum is collapsed to
+`lobby | answering | revealing | ended`: starting a round opens answering immediately (no separate
+`prompt` step), and scoring happens *inside* `revealing` (host reveals each player's pin in any order,
+reveals the solution at any time, and awards ±1 per player), so there is no distinct `scoring` phase.
+`host: next round` advances `current_round_idx` back to `answering`; `finish` (after the last round)
+→ `ended`. All transitions are RPCs that bump `reveal_seq` (§5). Player answers are written only via
+`submit_answer` (device ≠ player identity, §3/§9).
+
 ### Explicitly out of scope
 
 - **No live pin-drag streaming.** Only the final submitted answer is transmitted. This removes the
@@ -1008,9 +1016,16 @@ Each step de-risks the next.
 ## 15. Visual design — colour palette
 
 `CONSTRAINT` The project has **one fixed five-colour palette**. It is the *only* set of colours
-allowed anywhere — UI, map layers, pins, Board, charts. The **single** permitted addition is **white
-text** (on a dark-enough palette background). **Dark text is always `gunmetal` (`#424242`)** — never
-pure black, never an off-palette grey.
+allowed anywhere — UI, map layers, the solution pin, Board, charts. The **single** permitted addition
+is **white text** (on a dark-enough palette background). **Dark text is always `gunmetal` (`#424242`)**
+— never pure black, never an off-palette grey.
+
+**Documented exception — per-player marker colours.** Distinguishing ~20 players on a projector needs
+more than five hues, so **player answer pins and their leaderboard dots** use a separate categorical
+colour set ([lib/colors.ts](apps/web/src/lib/colors.ts)), assigned by join order and stable for the
+whole quiz. This is the *only* place off-palette colour is allowed, and it is confined to those
+markers/dots. Everything else — including the **solution pin** (rendered white + `gunmetal`, a
+distinct diamond shape, not a hue) — stays strict palette.
 
 | Token (Tailwind / CSS var) | Hex | Name | Typical use |
 |---|---|---|---|

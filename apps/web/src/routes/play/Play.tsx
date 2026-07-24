@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { RoleBadge } from "../../shared/RoleBadge";
-import { supabase, ensureAnonAuth } from "../../lib/supabase";
+import { ensureAnonAuth } from "../../lib/supabase";
 import { getRoomByCode, type Room } from "../../lib/room";
-import { joinRoom, fetchPlayerDevice, savedName, lastRoom, type Player } from "../../lib/player";
+import { joinRoom, savedName, lastRoom, type Player } from "../../lib/player";
 import { errMsg } from "../../lib/errMsg";
+import { useRoom, currentRound, submitAnswer } from "../../lib/game";
+import { colorMap } from "../../lib/colors";
+import { RoundSurface } from "../../surface/RoundSurface";
+import type { SurfacePoint } from "../../lib/surfacePoint";
 
 type KickReason = "superseded" | "removed";
 
@@ -231,53 +235,31 @@ function InRoom({
   onKicked: (reason: KickReason) => void;
 }) {
   const navigate = useNavigate();
+  const { snap } = useRoom(room.code);
+  const [myUid, setMyUid] = useState("");
+  const [myPin, setMyPin] = useState<SurfacePoint | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // Anti-griefing: watch our own player row. If device_id stops being this device,
-  // another device joined under our name → eject (they can rejoin to reclaim, which
-  // in turn kicks the other). If the row vanished, the host removed us.
   useEffect(() => {
-    let cancelled = false;
-    let myUid = "";
+    ensureAnonAuth().then(setMyUid);
+  }, []);
 
-    const check = async () => {
-      const dev = await fetchPlayerDevice(player.id);
-      if (cancelled) return;
-      if (dev === undefined) return onKicked("removed");
-      if (dev && myUid && dev !== myUid) onKicked("superseded");
-    };
+  // Anti-griefing + host-kick, derived from the live snapshot (no separate channel).
+  useEffect(() => {
+    if (!snap || !myUid) return;
+    const me = snap.players.find((p) => p.id === player.id);
+    if (!me) onKicked("removed");
+    else if (me.device_id && me.device_id !== myUid) onKicked("superseded");
+  }, [snap, myUid, player.id, onKicked]);
 
-    (async () => {
-      myUid = await ensureAnonAuth();
-      await check();
-    })();
+  const round = snap ? currentRound(snap) : undefined;
+  // Reset the working pin whenever the active round changes.
+  useEffect(() => {
+    setMyPin(null);
+  }, [round?.id]);
 
-    const channel = supabase
-      .channel(`player:${player.id}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "players", filter: `id=eq.${player.id}` },
-        () => check(),
-      )
-      .subscribe((s) => {
-        if (s === "SUBSCRIBED") check();
-      });
-
-    const onVis = () => {
-      if (document.visibilityState === "visible") check();
-    };
-    document.addEventListener("visibilitychange", onVis);
-
-    return () => {
-      cancelled = true;
-      supabase.removeChannel(channel);
-      document.removeEventListener("visibilitychange", onVis);
-    };
-  }, [player.id, onKicked]);
-
-  // Back-button safety: the phone "back" must not throw the player out of the app
-  // to a blank/unintended page. Push a guard entry; when back is pressed, send them
-  // to the (prefilled) code-entry screen instead. The session stays live, so the
-  // code is prefilled and returning auto-signs them back in.
+  // Back-button safety (see §9): keep the player inside the app on a prefilled code screen.
   useEffect(() => {
     window.history.pushState({ playGuard: true }, "");
     const onPop = () => navigate("/play", { replace: true });
@@ -285,26 +267,61 @@ function InRoom({
     return () => window.removeEventListener("popstate", onPop);
   }, [navigate]);
 
+  const footer = (
+    <div className="mt-6 flex flex-col items-center gap-2 text-xs opacity-70">
+      <button onClick={() => navigate("/play")} className="underline">leave room on this device</button>
+      <button onClick={onLogout} className="underline">log out ({player.nickname})</button>
+    </div>
+  );
+
+  if (!snap) return <p className="opacity-70">Loading…</p>;
+
+  const myColor = colorMap(snap.players.map((p) => p.id))[player.id] ?? "#f8a0cb";
+  const myAnswer = round ? snap.answers.find((a) => a.player_id === player.id && a.round_id === round.id) : undefined;
+
+  async function lock() {
+    if (!myPin) return;
+    setBusy(true); setError(null);
+    try { await submitAnswer(player.id, myPin); } catch (e) { setError(errMsg(e)); } finally { setBusy(false); }
+  }
+
+  // Header line shown in every phase.
+  const head = <p className="text-lg font-bold">Hi {player.nickname}</p>;
+
+  if (snap.room.phase === "lobby")
+    return <div className="flex flex-col items-center gap-3">{head}<p className="opacity-70">Waiting for the host to start…</p>{footer}</div>;
+
+  if (!round) return <div className="flex flex-col items-center gap-3">{head}<p className="opacity-70">Waiting…</p>{footer}</div>;
+
+  const answering = snap.room.phase === "answering" && !myAnswer;
+  const pins = [];
+  if (answering && myPin) pins.push({ id: "me", point: myPin, color: myColor });
+  if (myAnswer) pins.push({ id: "me", point: myAnswer.position, color: myColor });
+  if (round.revealed_solution) pins.push({ id: "sol", point: round.revealed_solution, color: "#fff", solution: true });
+
   return (
-    <div className="flex flex-col items-center gap-4">
-      <p className="opacity-70">Room {room.code}</p>
-      <p className="text-2xl font-bold">You're in, {player.nickname} 👋</p>
-      <p className="opacity-70">Waiting for the host…</p>
-
-      {/* ===== DUMMY SYNC TEST START ===== */}
-      <DummySender roomId={room.id} />
-      {/* ===== DUMMY SYNC TEST END ===== */}
-
-      <div className="mt-8 flex flex-col items-center gap-2 text-xs opacity-70">
-        {/* Leaving is intentionally low-key: it doesn't delete you from the quiz
-            (only the host can), it just returns this device to the code screen. */}
-        <button onClick={() => navigate("/play")} className="underline">
-          leave room on this device
-        </button>
-        <button onClick={onLogout} className="underline">
-          log out ({player.nickname})
-        </button>
+    <div className="flex w-full max-w-md flex-col items-center gap-2">
+      {head}
+      <p className="text-center font-semibold">{round.prompt || "…"}</p>
+      <div className="h-[55vh] w-full overflow-hidden rounded border border-white/40">
+        <RoundSurface round={round} pins={pins} onPick={answering ? setMyPin : undefined} />
       </div>
+
+      {answering ? (
+        <>
+          <p className="text-xs opacity-70">{myPin ? "Tap Lock in when you're sure." : "Tap the map to place your pin."}</p>
+          <button onClick={lock} disabled={!myPin || busy}
+            className="w-full rounded-lg bg-white px-6 py-3 text-lg font-semibold text-gunmetal disabled:opacity-50">
+            {busy ? "Locking…" : "Lock in"}
+          </button>
+        </>
+      ) : myAnswer ? (
+        <p className="rounded bg-white/20 px-3 py-1 text-sm">Locked in ✓ — waiting for the host.</p>
+      ) : (
+        <p className="rounded bg-white/20 px-3 py-1 text-sm">No answer locked — watch the board.</p>
+      )}
+      {error && <p className="rounded bg-pink px-3 py-2 text-sm text-gunmetal">{error}</p>}
+      {footer}
     </div>
   );
 }
@@ -347,48 +364,3 @@ function KickedScreen({
     </div>
   );
 }
-
-// ═══════════════════════════════════════════════════════════════════════════
-// ===== DUMMY SYNC TEST START =====
-// Throwaway: one button that inserts a dummy_ping with an incrementing counter,
-// so realtime delivery to the host can be tested. Delete with the table.
-
-function DummySender({ roomId }: { roomId: string }) {
-  const [counter, setCounter] = useState(0);
-  const [sending, setSending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function send() {
-    const next = counter + 1;
-    setSending(true);
-    setError(null);
-    try {
-      const playerId = await ensureAnonAuth();
-      const { error: err } = await supabase
-        .from("dummy_pings")
-        .insert({ room_id: roomId, player_id: playerId, counter: next });
-      if (err) throw err;
-      setCounter(next);
-    } catch (e) {
-      setError(errMsg(e));
-    } finally {
-      setSending(false);
-    }
-  }
-
-  return (
-    <div className="mt-6 flex flex-col items-center gap-3">
-      <button
-        onClick={send}
-        disabled={sending}
-        className="rounded-lg bg-white px-8 py-4 text-xl font-semibold text-gunmetal disabled:opacity-50"
-      >
-        Send dummy data
-      </button>
-      <p className="text-sm opacity-70">Next counter: {counter + 1}</p>
-      {error && <p className="rounded bg-pink px-3 py-2 text-sm text-gunmetal">{error}</p>}
-    </div>
-  );
-}
-// ===== DUMMY SYNC TEST END =====
-// ═══════════════════════════════════════════════════════════════════════════
