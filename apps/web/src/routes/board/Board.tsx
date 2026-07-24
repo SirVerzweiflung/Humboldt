@@ -88,13 +88,17 @@ function BoardGame({ snap, code }: { snap: Snapshot; code: string }) {
   if (!round)
     return <main className="flex h-full items-center justify-center bg-gunmetal text-white">…</main>;
 
-  // Board only receives revealed answers (RLS). Pins = those + solution once shown.
+  // Board only receives revealed answers (RLS). Restrict to THIS round + solution.
+  const roundAnswers = snap.answers.filter((a) => a.round_id === round.id && a.revealed_at);
   const revealedByPlayer: Record<string, (typeof snap.answers)[number]> = {};
-  for (const a of snap.answers) if (a.revealed_at) revealedByPlayer[a.player_id] = a;
+  for (const a of roundAnswers) revealedByPlayer[a.player_id] = a;
 
-  const pins: SurfacePin[] = snap.answers
-    .filter((a) => a.revealed_at)
-    .map((a) => ({ id: a.id, point: a.position, color: colors[a.player_id], label: nickOf(snap, a.player_id) }));
+  const pins: SurfacePin[] = roundAnswers.map((a) => ({
+    id: a.id,
+    point: a.position,
+    color: colors[a.player_id],
+    label: nickOf(snap, a.player_id),
+  }));
   if (round.revealed_solution)
     pins.push({ id: "sol", point: round.revealed_solution, color: "#fff", label: "solution", solution: true });
 
