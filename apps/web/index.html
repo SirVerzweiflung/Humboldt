@@ -7,6 +7,17 @@
       content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
     />
     <title>Map Quiz</title>
+
+    <!-- PWA (CLAUDE.md §11.6). The service worker is registered from
+         src/lib/pwa.ts in production builds only. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#424242" />
+
+    <!-- iOS ignores the manifest: it needs its own icon and standalone hints. -->
+    <link rel="apple-touch-icon" href="/icons/apple-touch-180.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Map Quiz" />
   </head>
   <body>
     <div id="root"></div>
