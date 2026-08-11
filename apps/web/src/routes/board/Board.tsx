@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { RoleBadge } from "../../shared/RoleBadge";
+import { StatusChip } from "../../shared/StatusChip";
+import { useWakeLock } from "../../lib/wakeLock";
 import { ensureAnonAuth } from "../../lib/supabase";
 import { getRoomByCode } from "../../lib/room";
 import { errMsg } from "../../lib/errMsg";
@@ -53,12 +55,21 @@ function JoinForm({ onJoined }: { onJoined: (code: string) => void }) {
 }
 
 function BoardRoom({ code }: { code: string }) {
-  const { snap } = useRoom(code);
+  const { snap, connection } = useRoom(code);
+  // The projector must never dim for the whole event (§11.1).
+  const wake = useWakeLock(true);
+  // Top-left, inside the 5 % overscan-safe inset (§11.5) so a cropping TV keeps it.
+  const status = (
+    <div className="pointer-events-none absolute left-[3%] top-[3%] z-10">
+      <StatusChip connection={connection} wake={wake} />
+    </div>
+  );
   if (!snap)
     return <main className="flex h-full items-center justify-center bg-gunmetal text-white">Loading {code}…</main>;
-  if (snap.room.phase === "lobby") return <Lobby code={code} />;
-  if (snap.room.phase === "ended") return <Leaderboard snap={snap} code={code} title="Final scores" />;
-  return <BoardGame snap={snap} code={code} />;
+  if (snap.room.phase === "lobby") return <Lobby code={code} status={status} />;
+  if (snap.room.phase === "ended")
+    return <Leaderboard snap={snap} code={code} title="Final scores" status={status} />;
+  return <BoardGame snap={snap} code={code} status={status} />;
 }
 
 // Discreet room code, inside the overscan-safe area (§11.5).
@@ -70,10 +81,11 @@ function CornerCode({ code }: { code: string }) {
   );
 }
 
-function Lobby({ code }: { code: string }) {
+function Lobby({ code, status }: { code: string; status: React.ReactNode }) {
   const joinUrl = `${window.location.origin}/play?room=${code}`;
   return (
     <main className="relative flex h-full flex-col items-center justify-center gap-6 bg-gunmetal p-6 text-white">
+      {status}
       <p className="text-lg opacity-70">Join the quiz</p>
       <p className="font-mono text-7xl font-bold tracking-widest">{code}</p>
       <div className="rounded-xl bg-white p-4"><QRCodeSVG value={joinUrl} size={220} fgColor="#424242" /></div>
@@ -82,7 +94,7 @@ function Lobby({ code }: { code: string }) {
   );
 }
 
-function BoardGame({ snap, code }: { snap: Snapshot; code: string }) {
+function BoardGame({ snap, code, status }: { snap: Snapshot; code: string; status: React.ReactNode }) {
   const round = currentRound(snap);
   const colors = colorMap(snap.players.map((p) => p.id));
   if (!round)
@@ -109,6 +121,7 @@ function BoardGame({ snap, code }: { snap: Snapshot; code: string }) {
 
   return (
     <main className="relative flex h-full bg-gunmetal text-white">
+      {status}
       <CornerCode code={code} />
       <section className="flex min-w-0 flex-1 flex-col p-4">
         <h1 className="mb-2 text-3xl font-bold">{round.prompt || "…"}</h1>
@@ -141,13 +154,16 @@ function BoardGame({ snap, code }: { snap: Snapshot; code: string }) {
   );
 }
 
-function Leaderboard({ snap, code, title }: { snap: Snapshot; code: string; title: string }) {
+function Leaderboard({ snap, code, title, status }: {
+  snap: Snapshot; code: string; title: string; status?: React.ReactNode;
+}) {
   const colors = colorMap(snap.players.map((p) => p.id));
   const ranked = snap.players
     .map((p, i) => ({ p, i, score: snap.scores[p.id] ?? 0 }))
     .sort((a, b) => (b.score !== a.score ? b.score - a.score : a.i - b.i));
   return (
     <main className="relative flex h-full flex-col items-center justify-center gap-4 bg-gunmetal p-6 text-white">
+      {status}
       <CornerCode code={code} />
       <h1 className="text-4xl font-bold">{title}</h1>
       <ol className="w-full max-w-lg space-y-1">

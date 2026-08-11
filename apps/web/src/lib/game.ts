@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "./supabase";
 import type { SurfacePoint } from "./surfacePoint";
+import type { Connection } from "../shared/StatusChip";
+
+export type { Connection };
 
 // ── types (mirror the DB) ───────────────────────────────────────────────────
 export type Phase = "lobby" | "answering" | "revealing" | "ended";
@@ -96,6 +99,11 @@ export function currentRound(snap: Snapshot): Round | undefined {
 export function useRoom(code: string) {
   const [snap, setSnap] = useState<Snapshot | null>(null);
   const [missing, setMissing] = useState(false);
+  // Channel health, surfaced for the status chip (§5). Realtime events are only
+  // hints — resync() is what repairs state — but the operator needs to see at a
+  // glance whether the Board is still listening.
+  const [channelUp, setChannelUp] = useState(false);
+  const [online, setOnline] = useState(() => navigator.onLine);
 
   const resync = useCallback(async () => {
     const s = await fetchSnapshot(code);
@@ -117,19 +125,27 @@ export function useRoom(code: string) {
       ch = ch.on("postgres_changes", { event: "*", schema: "public", table: t, filter }, () => resync());
     }
     ch.subscribe((s) => {
+      setChannelUp(s === "SUBSCRIBED");
       if (s === "SUBSCRIBED") resync();
     });
     const onVis = () => document.visibilityState === "visible" && resync();
+    const onOnline = () => { setOnline(true); resync(); };
+    const onOffline = () => setOnline(false);
     document.addEventListener("visibilitychange", onVis);
-    window.addEventListener("online", resync);
+    window.addEventListener("online", onOnline);
+    window.addEventListener("offline", onOffline);
     return () => {
       supabase.removeChannel(ch);
+      setChannelUp(false);
       document.removeEventListener("visibilitychange", onVis);
-      window.removeEventListener("online", resync);
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("offline", onOffline);
     };
   }, [roomId, code, resync]);
 
-  return { snap, missing, resync };
+  const connection: Connection = !online ? "offline" : channelUp ? "connected" : "reconnecting";
+
+  return { snap, missing, resync, connection };
 }
 
 // ── RPC wrappers ─────────────────────────────────────────────────────────────

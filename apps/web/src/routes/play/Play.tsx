@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { RoleBadge } from "../../shared/RoleBadge";
+import { StatusChip } from "../../shared/StatusChip";
+import { useWakeLock } from "../../lib/wakeLock";
 import { ensureAnonAuth } from "../../lib/supabase";
 import { getRoomByCode, type Room } from "../../lib/room";
 import { joinRoom, savedName, lastRoom, type Player } from "../../lib/player";
@@ -235,7 +237,10 @@ function InRoom({
   onKicked: (reason: KickReason) => void;
 }) {
   const navigate = useNavigate();
-  const { snap } = useRoom(room.code);
+  const { snap, connection } = useRoom(room.code);
+  // Phones only hold the lock while a pin is actually being placed (§11.1) —
+  // holding it all evening would flatten the battery for nothing.
+  const wake = useWakeLock(snap?.room.phase === "answering");
   const [myUid, setMyUid] = useState("");
   const [myPin, setMyPin] = useState<SurfacePoint | null>(null);
   const [busy, setBusy] = useState(false);
@@ -286,7 +291,12 @@ function InRoom({
   }
 
   // Header line shown in every phase.
-  const head = <p className="text-lg font-bold">Hi {player.nickname}</p>;
+  const head = (
+    <div className="flex w-full items-center gap-3">
+      <p className="text-lg font-bold">Hi {player.nickname}</p>
+      <StatusChip connection={connection} wake={wake === "held" ? wake : undefined} className="ml-auto" />
+    </div>
+  );
 
   if (snap.room.phase === "lobby")
     return <div className="flex flex-col items-center gap-3">{head}<p className="opacity-70">Waiting for the host to start…</p>{footer}</div>;

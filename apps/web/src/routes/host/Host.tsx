@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { RoleBadge } from "../../shared/RoleBadge";
+import { StatusChip } from "../../shared/StatusChip";
+import { useWakeLock } from "../../lib/wakeLock";
 import { ensureAnonAuth } from "../../lib/supabase";
 import { createRoom, claimRoom, getRoomByCode } from "../../lib/room";
 import { errMsg } from "../../lib/errMsg";
@@ -100,8 +102,11 @@ function StartScreen({ busy, onCreate, onRejoin }: { busy: boolean; onCreate: ()
 
 // ── room (lobby or game) ────────────────────────────────────────────────────
 function HostRoom({ code, onLeave }: { code: string; onLeave: () => void }) {
-  const { snap, resync } = useRoom(code);
+  const { snap, resync, connection } = useRoom(code);
   const [error, setError] = useState<string | null>(null);
+  // The moderator's tablet must not dim for the whole session (§11.1).
+  const wake = useWakeLock(true);
+  const status = <StatusChip connection={connection} wake={wake} />;
   const run = async (fn: () => Promise<unknown>) => {
     setError(null);
     try { await fn(); await resync(); } catch (e) { setError(errMsg(e)); }
@@ -112,12 +117,13 @@ function HostRoom({ code, onLeave }: { code: string; onLeave: () => void }) {
   const banner = error && <p className="rounded bg-pink px-3 py-2 text-sm text-gunmetal">{error}</p>;
 
   if (snap.room.phase === "lobby")
-    return <HostLobby snap={snap} code={code} run={run} onLeave={onLeave} banner={banner} />;
-  return <HostGame snap={snap} code={code} run={run} banner={banner} />;
+    return <HostLobby snap={snap} code={code} run={run} onLeave={onLeave} banner={banner} status={status} />;
+  return <HostGame snap={snap} code={code} run={run} onLeave={onLeave} banner={banner} status={status} />;
 }
 
-function HostLobby({ snap, code, run, onLeave, banner }: {
-  snap: Snapshot; code: string; run: (fn: () => Promise<unknown>) => Promise<void>; onLeave: () => void; banner: React.ReactNode;
+function HostLobby({ snap, code, run, onLeave, banner, status }: {
+  snap: Snapshot; code: string; run: (fn: () => Promise<unknown>) => Promise<void>; onLeave: () => void;
+  banner: React.ReactNode; status: React.ReactNode;
 }) {
   const [quizcode, setQuizcode] = useState("");
   const colors = colorMap(snap.players.map((p) => p.id));
@@ -125,7 +131,10 @@ function HostLobby({ snap, code, run, onLeave, banner }: {
 
   return (
     <Screen>
-      <RoleBadge label="/host" />
+      <div className="flex w-full items-center gap-3">
+        <RoleBadge label="/host" />
+        <span className="ml-auto">{status}</span>
+      </div>
       <div className="text-center">
         <p className="text-sm opacity-70">Room code</p>
         <p className="font-mono text-5xl font-bold tracking-widest">{code}</p>
@@ -175,8 +184,9 @@ function HostLobby({ snap, code, run, onLeave, banner }: {
 }
 
 // ── game control ────────────────────────────────────────────────────────────
-function HostGame({ snap, code, run, banner }: {
-  snap: Snapshot; code: string; run: (fn: () => Promise<unknown>) => Promise<void>; banner: React.ReactNode;
+function HostGame({ snap, code, run, onLeave, banner, status }: {
+  snap: Snapshot; code: string; run: (fn: () => Promise<unknown>) => Promise<void>; onLeave: () => void;
+  banner: React.ReactNode; status: React.ReactNode;
 }) {
   const active = currentRound(snap);
   const [previewIdx, setPreviewIdx] = useState(snap.room.current_round_idx);
@@ -186,7 +196,8 @@ function HostGame({ snap, code, run, banner }: {
   const previewRound = snap.rounds[previewIdx] ?? active;
   const isActivePreview = previewRound?.idx === snap.room.current_round_idx;
 
-  if (snap.room.phase === "ended") return <HostEnded snap={snap} colors={colors} />;
+  if (snap.room.phase === "ended")
+    return <HostEnded snap={snap} colors={colors} onLeave={onLeave} status={status} />;
   if (!active || !previewRound) return <Screen><p>Loading round…</p></Screen>;
 
   const activeAnswers = snap.answers.filter((a) => a.round_id === active.id);
@@ -221,6 +232,7 @@ function HostGame({ snap, code, run, banner }: {
         <RoleBadge label="/host" />
         <span className="font-mono">Room {code}</span>
         <span className="ml-auto text-sm opacity-80 capitalize">{snap.room.phase}</span>
+        {status}
       </header>
       {banner}
       <div className="flex min-h-0 flex-1">
@@ -309,10 +321,16 @@ function HostGame({ snap, code, run, banner }: {
   );
 }
 
-function HostEnded({ snap, colors }: { snap: Snapshot; colors: Record<string, string> }) {
+function HostEnded({ snap, colors, onLeave, status }: {
+  snap: Snapshot; colors: Record<string, string>; onLeave: () => void; status: React.ReactNode;
+}) {
   const ranked = [...snap.players].sort((a, b) => (snap.scores[b.id] ?? 0) - (snap.scores[a.id] ?? 0));
   return (
     <Screen>
+      <div className="flex w-full items-center gap-3">
+        <RoleBadge label="/host" />
+        <span className="ml-auto">{status}</span>
+      </div>
       <h1 className="text-3xl font-bold">Quiz ended</h1>
       <ol className="w-full max-w-md space-y-1">
         {ranked.map((p, i) => (
@@ -324,6 +342,13 @@ function HostEnded({ snap, colors }: { snap: Snapshot; colors: Record<string, st
           </li>
         ))}
       </ol>
+      <button onClick={onLeave} className="rounded-lg bg-white px-6 py-3 text-lg font-semibold text-gunmetal">
+        Back to host screen
+      </button>
+      <p className="max-w-md text-center text-xs opacity-70">
+        This room stays finished — the button returns this device to the host start screen, where you
+        can create a new room.
+      </p>
     </Screen>
   );
 }
