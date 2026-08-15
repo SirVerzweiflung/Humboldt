@@ -18,6 +18,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # ── defaults ────────────────────────────────────────────────────────────────
 PORT=8080
+# All interfaces by default: the tunnel or reverse proxy that fronts this app
+# often runs on a DIFFERENT machine, and loopback-only silently locks it out —
+# along with every phone on the LAN during a pre-event test.
+BIND=0.0.0.0
 UPLOAD_PORT=8787
 APP_DIR=/srv/humboldt
 UPLOAD_DIR=/var/lib/humboldt/uploads
@@ -28,6 +32,7 @@ SKIP_USER=0
 NON_INTERACTIVE=0
 
 ENV_FILE=/etc/humboldt/upload.env
+SITE_ENV=/etc/humboldt/site.env
 UNIT_FILE=/etc/systemd/system/humboldt-upload.service
 CADDY_SNIPPET=/etc/caddy/conf.d/humboldt.caddyfile
 CADDY_MAIN=/etc/caddy/Caddyfile
@@ -36,7 +41,9 @@ usage() {
   cat <<EOF
 Usage: sudo $0 [options]
 
-  --port N            HTTP port the site listens on, loopback only (default: $PORT)
+  --port N            HTTP port the site listens on                (default: $PORT)
+  --bind ADDR         interface to listen on; 0.0.0.0 = all        (default: $BIND)
+                      use 127.0.0.1 only if your tunnel runs on THIS machine
   --upload-port N     port for the image upload service          (default: $UPLOAD_PORT)
   --app-dir PATH      checkout + releases live here              (default: $APP_DIR)
   --upload-dir PATH   uploaded images live here                  (default: $UPLOAD_DIR)
@@ -55,6 +62,7 @@ EOF
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --port) PORT="$2"; shift 2 ;;
+    --bind) BIND="$2"; shift 2 ;;
     --upload-port) UPLOAD_PORT="$2"; shift 2 ;;
     --app-dir) APP_DIR="$2"; shift 2 ;;
     --upload-dir) UPLOAD_DIR="$2"; shift 2 ;;
@@ -205,6 +213,18 @@ EOF
 chown "$SERVICE_USER":"$SERVICE_USER" "$WEB_ENV"
 chmod 640 "$WEB_ENV"
 
+# Where the site is served. Persisted so doctor.sh and later re-runs never have
+# to be told again — a health check with its own default port will happily test
+# the wrong address and report PASS about nothing.
+does "$SITE_ENV"
+cat >"$SITE_ENV" <<EOF
+# Written by scripts/setup-server.sh. Read by scripts/doctor.sh.
+SITE_PORT=$PORT
+SITE_BIND=$BIND
+SITE_APP_DIR=$APP_DIR
+EOF
+chmod 644 "$SITE_ENV"
+
 does "$ENV_FILE"
 cat >"$ENV_FILE" <<EOF
 # Written by scripts/setup-server.sh. UPLOAD_TOKEN must equal VITE_UPLOAD_TOKEN
@@ -240,10 +260,18 @@ if [[ $SKIP_CADDY -eq 1 ]]; then
 else
   mkdir -p "$(dirname "$CADDY_SNIPPET")"
   does "$CADDY_SNIPPET"
+  # 0.0.0.0 means "every interface", which in Caddy is expressed by omitting the
+  # bind directive entirely rather than by naming the wildcard.
+  if [[ "$BIND" == "0.0.0.0" || -z "$BIND" ]]; then
+    BIND_SED='/__BIND_LINE__/d'
+  else
+    BIND_SED="s|__BIND_LINE__|bind $BIND|"
+  fi
   sed -e "s|__PORT__|$PORT|g" \
       -e "s|__UPLOAD_PORT__|$UPLOAD_PORT|g" \
       -e "s|__UPLOAD_DIR__|$UPLOAD_DIR|g" \
       -e "s|__CURRENT__|$APP_DIR/current|g" \
+      -e "$BIND_SED" \
       "$ROOT/deploy/humboldt.caddyfile.tpl" >"$CADDY_SNIPPET"
 
   # Additive on purpose: this box may already serve other sites, and silently
@@ -282,12 +310,27 @@ fi
 
 # ── done ────────────────────────────────────────────────────────────────────
 step "Done"
+LAN_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+if [[ "$BIND" == "0.0.0.0" || -z "$BIND" ]]; then
+  cat <<EOF
+   Humboldt serves plain HTTP on port $PORT, on every interface:
+     http://127.0.0.1:$PORT          (this machine)
+     http://${LAN_IP:-<lan-ip>}:$PORT          (LAN — phones, and a tunnel on another host)
+
+   Point your tunnel or reverse proxy at whichever of those it can reach.
+   TLS is terminated there, not here — this is plain HTTP on your LAN.
+EOF
+else
+  cat <<EOF
+   Humboldt serves plain HTTP on http://$BIND:$PORT only.
+   Anything not on this machine — including a tunnel running elsewhere — cannot
+   reach it. Re-run with --bind 0.0.0.0 if that is not what you want.
+EOF
+fi
 cat <<EOF
-   Humboldt will serve plain HTTP on http://127.0.0.1:$PORT
-   Point your tunnel or reverse proxy at that address; TLS is terminated there.
 
    Next:
      cd $REPO_DIR
      sudo -u $SERVICE_USER ./scripts/deploy.sh     # build + publish a release
-     ./scripts/doctor.sh --port $PORT              # verify the whole stack
+     ./scripts/doctor.sh                           # verify (reads $SITE_ENV)
 EOF

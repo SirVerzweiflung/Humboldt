@@ -1,12 +1,16 @@
 # Template — scripts/setup-server.sh substitutes the __PLACEHOLDER__ tokens and
 # installs the result as /etc/caddy/conf.d/humboldt.caddyfile.
 #
-# Plain HTTP bound to loopback: TLS and the public hostname are handled upstream
-# (a Cloudflare Tunnel, nginx, whatever you already run). Because the address is
-# a bare port, Caddy never tries to obtain a certificate.
+# Plain HTTP: TLS and the public hostname are handled upstream (a Cloudflare
+# Tunnel, nginx, whatever you already run). Because the address is a bare port,
+# Caddy never tries to obtain a certificate.
+#
+# setup-server.sh writes the bind line only when --bind names a specific
+# address; with the default 0.0.0.0 the line is dropped and Caddy listens on
+# every interface, which is what a tunnel running on ANOTHER host needs.
 
 :__PORT__ {
-	bind 127.0.0.1
+	__BIND_LINE__
 
 	# Quiz images, served LIVE from the upload directory — never from the
 	# release. This route is matched before the SPA root, so a stale copy

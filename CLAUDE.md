@@ -832,21 +832,33 @@ in `deploy/`:
   **body** of `/geo/manifest.json` rather than its status, because the SPA fallback answers a missing
   asset with 200 + `index.html`.
 
-`CONSTRAINT` **The reverse-proxy contract is plain HTTP on `127.0.0.1:<port>`** (default 8080,
-`--port` to change). TLS, DNS and the tunnel are the operator's business and no repo script touches
-them — `cloudflared` is not installed or configured by anything here.
+`CONSTRAINT` **The reverse-proxy contract is plain HTTP on `<bind>:<port>`** — default `0.0.0.0:8080`,
+changed with `--bind` / `--port`. TLS, DNS and the tunnel are the operator's business and no repo
+script touches them; `cloudflared` is not installed or configured by anything here, and it commonly
+does not even run on this machine.
 
 **Caddy integration is additive**: a snippet at `/etc/caddy/conf.d/humboldt.caddyfile` plus an
 `import /etc/caddy/conf.d/*.caddyfile` line appended to the main Caddyfile only when absent. Never
 rewrite the main Caddyfile — the box may already serve other sites. `--skip-caddy` opts out entirely.
 
-`CONSTRAINT` **That import path must be absolute.** Caddy resolves a *relative* import glob against
-the caddy process's working directory — not the Caddyfile's directory — and Debian's unit sets no
-`WorkingDirectory`, so `import conf.d/*.caddyfile` resolves against `/`. A glob matching nothing is
-silently ignored: no error, no log line, `caddy validate` still passes, and the site never loads.
-This bit us on the first real deploy. Consequently **`caddy validate` is not an acceptable health
-check** — `setup-server.sh` and `doctor.sh` both `caddy adapt` and grep the output for `:<port>"`,
-which is the only thing that proves the site is actually in the loaded config.
+The import path is written absolute (`/etc/caddy/conf.d/*.caddyfile`) as a defensive measure —
+whether Caddy resolves a relative import glob against the Caddyfile's directory or the process's
+working directory is not something worth depending on. `caddy validate` is nonetheless **not** an
+acceptable health check: a config that imports nothing validates perfectly and serves no site, so
+`setup-server.sh` and `doctor.sh` both run `caddy adapt` and grep the output for `:<port>"`, which is
+the only thing proving the site reached the loaded config.
+
+`CONSTRAINT` **The port and bind address live in `/etc/humboldt/site.env`**, written by
+`setup-server.sh` and read by `doctor.sh`. Neither may carry its own default port. The first real
+deploy ran on port 20261 while `doctor.sh` probed its hardcoded 8080 and reported three confident
+failures about an address nobody was serving — a health check that invents its own target is worse
+than no health check.
+
+**Bind defaults to `0.0.0.0`, not loopback.** The original design assumed the tunnel ran on the same
+box; in practice it often runs on another host and points at this machine's LAN address, and phones
+need to reach the app directly during a pre-event test. Loopback-only breaks both while every
+127.0.0.1 health check still passes, so `doctor.sh` explicitly tests the LAN address too and fails
+when the bind would lock everything else out. `--bind 127.0.0.1` restores the old behaviour.
 
 This resolves the `OPEN` on deployment method below in favour of the scripts; a self-hosted GitHub
 Actions runner remains a valid way to *invoke* `deploy.sh`, not a replacement for it.

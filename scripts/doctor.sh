@@ -13,20 +13,32 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-PORT=8080
-APP_DIR="$(dirname "$ROOT")"
 ENV_FILE=/etc/humboldt/upload.env
+SITE_ENV=/etc/humboldt/site.env
 SKIP_CADDY=0
+
+# Defaults come from what setup-server.sh actually deployed, NOT from a constant
+# in this file. A health check that invents its own port tests an address nobody
+# is serving and reports failures about nothing — which is exactly what happened
+# on the first real deploy, where the site was on 20261 and this script probed
+# 8080.
+site_value() { [[ -f "$SITE_ENV" ]] && sed -n "s/^$1=//p" "$SITE_ENV" | head -1 || true; }
+PORT="$(site_value SITE_PORT)"; PORT="${PORT:-8080}"
+BIND="$(site_value SITE_BIND)"; BIND="${BIND:-0.0.0.0}"
+APP_DIR="$(site_value SITE_APP_DIR)"; APP_DIR="${APP_DIR:-$(dirname "$ROOT")}"
 
 usage() {
   cat <<EOF
 Usage: $0 [options]
 
-  --port N        port the site is served on   (default: $PORT)
+  --port N        port the site is served on   (default: $PORT, from $SITE_ENV)
   --app-dir PATH  where current/ lives         (default: $APP_DIR)
   --env-file PATH upload service env file      (default: $ENV_FILE)
   --skip-caddy    skip the Caddy checks
   -h, --help      this text
+
+Port, bind address and app dir are read from $SITE_ENV, which
+setup-server.sh writes, so they cannot drift from the real deployment.
 EOF
 }
 
@@ -52,7 +64,7 @@ skip() { printf '  ....  %s\n' "$*"; }
 
 read_env() { [[ -f "$2" ]] && sed -n "s/^$1=//p" "$2" | head -1 || true; }
 
-echo "Humboldt doctor — $BASE, releases in $APP_DIR"
+echo "Humboldt doctor — $BASE (bind $BIND), releases in $APP_DIR"
 echo
 
 # 1 ── client env completeness
@@ -165,9 +177,26 @@ else
   else fail "release $target is incomplete (want index.html, assets/, geo/)"; fi
 fi
 
+# 10 ── reachable from anywhere but this machine?
+# Every check above talks to 127.0.0.1, so they all pass on a loopback-only bind
+# while no phone and no off-box tunnel can reach the app at all. Say so plainly.
+LAN_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+if [[ "$BIND" == "0.0.0.0" || -z "$BIND" ]]; then
+  if [[ -n "$LAN_IP" ]] && curl -fsS --max-time 5 -o /dev/null "http://$LAN_IP:$PORT/board" 2>/dev/null; then
+    pass "reachable off-box at http://$LAN_IP:$PORT"
+  elif [[ -n "$LAN_IP" ]]; then
+    fail "http://$LAN_IP:$PORT is not reachable — firewall on $PORT?"
+  else
+    skip "no LAN address detected; cannot test off-box reachability"
+  fi
+else
+  fail "bound to $BIND only — no phone and no off-box tunnel can reach this. Re-run setup-server.sh with --bind 0.0.0.0"
+fi
+
 echo
 if [[ $FAILED -eq 0 ]]; then
   echo "All checks passed."
+  [[ -n "$LAN_IP" ]] && echo "Players: http://$LAN_IP:$PORT/   ·   Board: http://$LAN_IP:$PORT/board"
 else
   echo "$FAILED check(s) failed."
 fi

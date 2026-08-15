@@ -85,17 +85,25 @@ every deploy and as the first item on the pre-quiz checklist.
 
 ### Exposing it
 
-The app serves **plain HTTP on `127.0.0.1:8080`** (change with `--port`). TLS, DNS and tunnelling are
+The app serves **plain HTTP on `0.0.0.0:8080`** (change with `--port` / `--bind`). TLS, DNS and tunnelling are
 deliberately outside these scripts — point whatever you already run at that address.
+
+Because the default bind is every interface, the app is reachable three ways: `127.0.0.1:8080` on the
+box, `<lan-ip>:8080` from phones and from a tunnel running on **another** machine, and via whatever
+public hostname you put in front. `doctor.sh` prints the LAN URL when it finishes.
 
 For a Cloudflare Tunnel that means an ingress rule like:
 
 ```yaml
 ingress:
   - hostname: quiz.example.com
-    service: http://127.0.0.1:8080
-  - service: http_status:404
+    service: http://127.0.0.1:8080     # or http://<lan-ip>:8080 if cloudflared
+  - service: http_status:404           # runs on a different host
 ```
+
+If you want the old loopback-only behaviour, pass `--bind 127.0.0.1` — but then nothing except this
+machine can reach the app, including a tunnel running elsewhere, while every check that talks to
+`127.0.0.1` still passes. `doctor.sh` fails loudly on that combination for exactly this reason.
 
 TLS terminates at Cloudflare's edge, which also satisfies the secure-context requirement for the
 Wake Lock API and the service worker. Realtime traffic goes browser → Supabase directly and never
@@ -109,6 +117,7 @@ rides the tunnel, so tunnel restarts cannot desync a game.
 /srv/humboldt/current  ────→   symlink to the live release (swapped atomically)
 /var/lib/humboldt/uploads/     quiz images
 /etc/humboldt/upload.env       UPLOAD_TOKEN etc. (root:humboldt, 0640)
+/etc/humboldt/site.env         port + bind + app dir; doctor.sh reads these
 /etc/systemd/system/humboldt-upload.service
 /etc/caddy/conf.d/humboldt.caddyfile
 ```
@@ -125,10 +134,11 @@ never runs the Natural Earth pipeline. Regenerate them only if you change preset
 ### Script options
 
 ```
-setup-server.sh  --port N  --upload-port N  --app-dir PATH  --upload-dir PATH  --user NAME
-                 --skip-packages  --skip-caddy  --skip-user  --non-interactive
+setup-server.sh  --port N  --bind ADDR  --upload-port N  --app-dir PATH  --upload-dir PATH
+                 --user NAME  --skip-packages  --skip-caddy  --skip-user  --non-interactive
 deploy.sh        --pull  --app-dir PATH  --keep N
 doctor.sh        --port N  --app-dir PATH  --env-file PATH  --skip-caddy
+                 (port/bind/app-dir default to /etc/humboldt/site.env)
 ```
 
 `--non-interactive` reads `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` and
@@ -184,7 +194,8 @@ the bundle — that prefix is exactly what would leak a secret, so never apply i
 
 | Symptom | Cause / fix |
 |---|---|
-| Every HTTP check fails but Caddy is active | Nothing is listening on the port. Check the `import` line in `/etc/caddy/Caddyfile` is an **absolute** path: Caddy resolves a relative import glob against its working directory, matches nothing, and silently loads no site — `caddy validate` still passes. Confirm with `sudo caddy adapt --config /etc/caddy/Caddyfile \| grep -c 8080`. |
+| Every HTTP check fails but Caddy is active | Almost always the checker is looking at the wrong port. `doctor.sh` reads the real port from `/etc/humboldt/site.env`; if that file is stale, re-run `setup-server.sh`. Confirm what Caddy actually serves with `sudo caddy adapt --config /etc/caddy/Caddyfile \| grep -o ':[0-9]*"'`. |
+| Works on the box, unreachable from a phone or your tunnel | The site is bound to loopback. Re-run `sudo ./scripts/setup-server.sh --bind 0.0.0.0` (the default). `doctor.sh` fails explicitly on this now, since every other check talks to 127.0.0.1 and would pass regardless. |
 | `/geo/*.topo.json` "loads" but `JSON.parse` fails | The SPA fallback answered with `index.html` and a **200**. Check the body, not the status — `doctor.sh` does exactly this. |
 | Blank page, console: "Missing VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY" | `.env` was empty or filled in *after* the build. Redeploy — these are inlined at build time. |
 | Turnstile never passes | The widget's hostname list omits your domain, or Supabase Auth has a different/blank Turnstile secret. |

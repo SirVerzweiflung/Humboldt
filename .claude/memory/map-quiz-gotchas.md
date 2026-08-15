@@ -38,12 +38,18 @@ Traps already hit on [[project-map-quiz]] — check these first when something b
   reading the body: `PGRST202`/"Could not find the function" = not deployed, a domain error like
   "no such room" = deployed and reachable. (Probe with a room code that cannot exist, e.g. six
   dashes — room codes are alphanumeric, so it can only raise, never mutate.)
-- **Caddy `import` globs are relative to the PROCESS's working directory**, not to the Caddyfile.
-  Debian's unit sets no `WorkingDirectory` → `import conf.d/*.caddyfile` resolved against `/`,
-  matched nothing, and was **silently ignored** — no error, no log line, `caddy validate` still
-  passed, and nothing listened on :8080 (hit on the first real deploy, 2026-08-15). Always import by
-  absolute path. Corollary: **`caddy validate` is worthless as a health check**; use
-  `caddy adapt --config … | grep -F ':<port>"'`, which is what `setup-server.sh`/`doctor.sh` now do.
+- **A health check must never carry its own default target.** First real deploy (2026-08-15) ran on
+  port 20261; `doctor.sh` probed its hardcoded default 8080 and reported three confident FAILs about
+  an address nobody served — and I misdiagnosed it as a broken Caddy import before checking that the
+  ports matched. Port/bind/app-dir now live in `/etc/humboldt/site.env`, written by
+  `setup-server.sh`, read by `doctor.sh`. **When a health check disagrees with reality, suspect the
+  check's assumptions about WHERE it is looking before theorising about the service.**
+- **`caddy validate` is worthless as a health check** — a Caddyfile that imports nothing validates
+  perfectly and serves no site. Use `caddy adapt --config … | grep -F ':<port>"'`.
+- **Loopback-only bind locks out the tunnel and every phone.** The tunnel frequently runs on a
+  *different* host and targets this box's LAN IP, so `bind 127.0.0.1` breaks everything while all
+  127.0.0.1 health checks still pass. Default is now `--bind 0.0.0.0`, and `doctor.sh` tests the LAN
+  address explicitly.
 - **Chrome will not fire `beforeinstallprompt` without a registered service worker** that has a
   `fetch` handler. `public/sw.js` exists only for that; it caches NOTHING (§11.6 forbids an
   aggressive cache) and is registered in prod builds only.
