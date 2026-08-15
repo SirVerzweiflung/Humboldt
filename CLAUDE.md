@@ -92,7 +92,8 @@ reveals the solution at any time, and awards ±1 per player), so there is no dis
 
 ### Repo shape
 
-One repo, one Vite app, three routes — not three deployments.
+One repo, one Vite app, five routes (`/` chooser + the three roles + the editor) — not three
+deployments.
 
 `[now]` = scaffolded and on disk today. `[planned]` = intended, created when the feature that
 needs it lands (§13 build order). Don't create `[planned]` dirs empty; add them with their first
@@ -106,7 +107,13 @@ real file.
 ├── .gitignore                 ← node_modules, dist, .env*, .devserver.*    [now]
 ├── scripts/
 │   ├── start.sh               ← detached vite + upload service (setsid group) [now]
-│   └── stop.sh                ← kills the whole process group              [now]
+│   ├── stop.sh                ← kills the whole process group              [now]
+│   ├── setup-server.sh        ← idempotent Debian install; probes+skips (§10.3) [now]
+│   ├── deploy.sh              ← build → timestamped release → atomic swap  [now]
+│   └── doctor.sh              ← 9 pass/fail checks on a deployed box       [now]
+├── deploy/                    ← templates substituted by setup-server.sh   [now]
+│   ├── humboldt-upload.service.tpl
+│   └── humboldt.caddyfile.tpl
 ├── server/upload/            ← self-hosted image upload service (§4/§10)   [now]
 │   └── index.mjs              ← zero-dep Node; POST /api/upload, token-gated
 ├── apps/web/
@@ -116,13 +123,15 @@ real file.
 │   ├── .env                   ← VITE_SUPABASE_* / TURNSTILE / UPLOAD (gitignored) [now]
 │   ├── .env.example           ← committed template of the above           [now]
 │   └── src/
-│       ├── main.tsx           ← router (React.lazy per route) + AuthGate   [now]
+│       ├── main.tsx           ← router OUTSIDE AuthGate; role routes gated individually [now]
 │       ├── index.css          ← tailwind directives + touch resets        [now]
-│       ├── lib/               ← supabase, room, quiz(RPC), quizSchema(zod), geo, upload [now]
+│       ├── lib/               ← supabase, room, quiz(RPC), quizSchema(zod), geo, upload,
+│       │                        wakeLock (§11.1), pwa (§11.6)             [now]
 │       ├── surface/           ← GeoSurface (MapLibre) + ImageSurface (pan/zoom) [now]
-│       ├── shared/            ← AuthGate, RoleBadge                        [now]
+│       ├── shared/            ← AuthGate, RoleBadge, StatusChip (§5)       [now]
 │       │                        promote to packages/ui only if a 2nd app appears
 │       └── routes/
+│           ├── landing/         ← role chooser at "/", ungated, PWA install [now]
 │           ├── {play,host,board}/                                        [now]
 │           └── quiz/            ← quiz editor (create/edit by quizcode, §4) [now]
 │   note: apps/web/vite.config.ts sets publicDir → repo-root/public (below)
@@ -140,8 +149,13 @@ real file.
 │   ├── build.mjs              ← shapefiles → per-preset hashed TopoJSON    [now]
 │   ├── presets.json           ← build-time preset catalogue (§6.4)         [now]
 │   └── sources/               ← unzipped Natural Earth downloads (gitignored) [local]
+├── tools/icons/               ← zero-dep PNG icon generator (§11.6)        [now]
+│   └── build.mjs              ← node:zlib only; white "H" on pacific
 └── public/                    ← Vite publicDir (apps/web serves from here)
     ├── geo/                   ← built TopoJSON layers + manifest.json      [now]
+    ├── icons/                 ← generated PWA icons, committed             [now]
+    ├── manifest.webmanifest   ← PWA manifest                               [now]
+    ├── sw.js                  ← installability-only SW, caches nothing     [now]
     └── uploads/               ← images written by server/upload (gitignored) [dev]
 ```
 
@@ -490,8 +504,13 @@ Same trick applies anywhere visibility changes rather than existence.
 
 ### Failure UX — build it early, not last
 
-A persistent connection chip on all three screens, driven by channel status + `navigator.onLine`:
-`connected` (silent) / `reconnecting…` (amber) / `offline` (red). On the phone, if a submit fails,
+**As built:** `useRoom` returns a `connection` value (`connected | reconnecting | offline`) derived
+from the channel's `subscribe()` status plus `navigator.onLine`; `shared/StatusChip.tsx` renders it
+next to the wake-lock state (§11.1) on Host, Board and Play. Palette mapping: `white/20` when
+connected, `wheat` while reconnecting, `pink` when offline.
+
+The original intent, for reference: a persistent connection chip on all three screens, driven by
+channel status + `navigator.onLine`. On the phone, if a submit fails,
 keep the pin in `localStorage` and retry on reconnect — but only if the round is still `answering`
 server-side; otherwise say "too late" rather than silently dropping it.
 
@@ -789,7 +808,36 @@ Local loop: `supabase init` / `link` / `db diff -f <name>` / `start`.
 
 ### 10.3 Frontend on the Debian box behind a Cloudflare Tunnel
 
-Target setup: **static SPA served by Caddy (or nginx) on Debian, exposed through `cloudflared`.**
+**As built (this supersedes the sketch below where they differ).** Three scripts plus two templates
+in `deploy/`:
+
+- `scripts/setup-server.sh` — idempotent install: apt packages (Node 22, pnpm 10, Caddy), the
+  `humboldt` system user, the directory layout, `/etc/humboldt/upload.env`, `apps/web/.env`, the
+  systemd unit, and the Caddy snippet. It **probes before acting** and reports `present — skipping`
+  for anything found, so re-running it is the intended way to change the port or a key. It prompts
+  only for the three values it cannot derive (Supabase URL + anon key, Turnstile site key) and
+  generates `UPLOAD_TOKEN` once, preserving it thereafter.
+- `scripts/deploy.sh` — `pnpm build` → `releases/<UTC ts>/` → `ln` + `mv -T` onto `current`. The
+  two-step swap is a single `rename()`; `ln -sfn` unlinks first and leaves a window in which a player
+  loads a half-written app. Keeps the last five releases.
+- `scripts/doctor.sh` — nine `PASS`/`FAIL` checks, all of which run even after one fails. Two are
+  worth naming: it greps the **live bundle** for the server's `UPLOAD_TOKEN` (the client half is
+  inlined at build time, so rotating one side alone breaks uploads silently), and it inspects the
+  **body** of `/geo/manifest.json` rather than its status, because the SPA fallback answers a missing
+  asset with 200 + `index.html`.
+
+`CONSTRAINT` **The reverse-proxy contract is plain HTTP on `127.0.0.1:<port>`** (default 8080,
+`--port` to change). TLS, DNS and the tunnel are the operator's business and no repo script touches
+them — `cloudflared` is not installed or configured by anything here.
+
+**Caddy integration is additive**: a snippet at `/etc/caddy/conf.d/humboldt.caddyfile` plus an
+`import conf.d/*.caddyfile` line appended to the main Caddyfile only when absent. Never rewrite the
+main Caddyfile — the box may already serve other sites. `--skip-caddy` opts out entirely.
+
+This resolves the `OPEN` on deployment method below in favour of the scripts; a self-hosted GitHub
+Actions runner remains a valid way to *invoke* `deploy.sh`, not a replacement for it.
+
+Original sketch: **static SPA served by Caddy (or nginx) on Debian, exposed through `cloudflared`.**
 
 - **TLS is handled at the Cloudflare edge**, so the public origin is HTTPS with no certbot and no
   open inbound ports. This satisfies the secure-context requirement for Wake Lock, service workers,
@@ -879,6 +927,13 @@ VITE_SUPABASE_ANON_KEY=
 
 ### 11.1 Keep the screen on
 
+**As built:** `lib/wakeLock.ts` exports `useWakeLock(active: boolean): 'held' | 'unsupported' |
+'denied'`. It re-acquires on `visibilitychange` → visible, releases when `active` goes false or on
+unmount, and reports refusal as state rather than throwing. Per-screen policy, wired in Task 2:
+**Host** and **Board** pass `true` for the whole session; **Play** passes
+`phase === 'answering'` so a phone is not held awake all evening. The result is shown in the status
+chip (§5), which is what the pre-quiz checklist (§12) actually reads.
+
 **Screen Wake Lock API** — Chrome/Edge 84+, Firefox 126+, Safari 16.4+ (desktop and iOS). Installed
 iOS home-screen web apps had a bug that broke it until iOS 18.4.
 
@@ -951,11 +1006,24 @@ Host and Board → landscape-first.
 - Long uptime: clean up every interval, MapLibre instance, image object URL, and channel in effect
   teardown. A three-hour quiz will find the one you missed.
 
-### 11.6 PWA (optional, mainly for the Host)
+### 11.6 PWA
+
+**As built.** `public/manifest.webmanifest` (standalone, `start_url: "/"`, gunmetal theme),
+`public/icons/*` generated by `tools/icons/build.mjs` (zero-dep PNG encoder over `node:zlib`, white
+"H" on `pacific`), apple-touch + `apple-mobile-web-app-*` head tags for iOS, and
+`lib/pwa.ts` exporting `useInstallPrompt()` + `registerServiceWorker()`.
+
+`CONSTRAINT` **`public/sw.js` caches nothing.** It exists solely because Chrome refuses to fire
+`beforeinstallprompt` without a registered worker that has a `fetch` handler. It `skipWaiting()`s,
+`clients.claim()`s, deletes any cache it finds, and never calls `respondWith` — so it cannot serve a
+stale shell. It is registered in production builds only, so `pnpm dev` never installs one. Caddy
+serves `/sw.js`, `/index.html` and `/manifest.webmanifest` as `no-cache`.
+
+The install affordance lives on the landing page (`/`) only: a button where
+`beforeinstallprompt` fired, and a "Share → Add to Home Screen" hint on iOS, which has no such API.
 
 `display: standalone` gives the tablet a chrome-free moderator view, a home-screen icon, and more
-durable storage for the anon session on iOS. Avoid an aggressive service-worker cache during
-development — a stale shell on quiz night is worse than a slow first load.
+durable storage for the anon session on iOS.
 
 ---
 
@@ -963,7 +1031,8 @@ development — a stale shell on quiz night is worse than a slow first load.
 
 1. Restore the Supabase project if it has paused (7-day rule).
 2. Open the Board, go fullscreen, confirm the room code and QR are inside the safe area.
-3. Set the tablet to never auto-lock; confirm the wake lock chip is green.
+3. Set the tablet to never auto-lock; confirm the status chip reads **live / awake** (§5). `pink`
+   means offline, `wheat` means reconnecting, and `▢ may dim` means the OS refused the wake lock.
 4. Have the quizcode ready; create the room from it and step through every round in a "dry run" mode
    that shows the surface without opening answering (`OPEN` — worth building, it catches broken
    images and bad bboxes).
@@ -993,6 +1062,10 @@ Each step de-risks the next.
    `quiz_save`; JSON export. Reuses steps 5 + 6, so it comes after them.
 8. Manual scoring, leaderboard, export.
 9. Board polish, wake locks, PWA, deployment pipeline, checklist page.
+   **Done except polish:** wake locks + status chip (§5/§11.1), PWA + install prompt on the new
+   role-chooser landing page (§11.6), and the `setup-server`/`deploy`/`doctor` pipeline (§10.3).
+   Still open: visual polish, the in-app checklist page, JSON/CSV results export, freezing
+   `answers.distance` in the DB, and dropping the unused `dummy_pings` table.
 
 ---
 
