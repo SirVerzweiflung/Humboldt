@@ -837,8 +837,16 @@ in `deploy/`:
 them — `cloudflared` is not installed or configured by anything here.
 
 **Caddy integration is additive**: a snippet at `/etc/caddy/conf.d/humboldt.caddyfile` plus an
-`import conf.d/*.caddyfile` line appended to the main Caddyfile only when absent. Never rewrite the
-main Caddyfile — the box may already serve other sites. `--skip-caddy` opts out entirely.
+`import /etc/caddy/conf.d/*.caddyfile` line appended to the main Caddyfile only when absent. Never
+rewrite the main Caddyfile — the box may already serve other sites. `--skip-caddy` opts out entirely.
+
+`CONSTRAINT` **That import path must be absolute.** Caddy resolves a *relative* import glob against
+the caddy process's working directory — not the Caddyfile's directory — and Debian's unit sets no
+`WorkingDirectory`, so `import conf.d/*.caddyfile` resolves against `/`. A glob matching nothing is
+silently ignored: no error, no log line, `caddy validate` still passes, and the site never loads.
+This bit us on the first real deploy. Consequently **`caddy validate` is not an acceptable health
+check** — `setup-server.sh` and `doctor.sh` both `caddy adapt` and grep the output for `:<port>"`,
+which is the only thing that proves the site is actually in the loaded config.
 
 This resolves the `OPEN` on deployment method below in favour of the scripts; a self-hosted GitHub
 Actions runner remains a valid way to *invoke* `deploy.sh`, not a replacement for it.

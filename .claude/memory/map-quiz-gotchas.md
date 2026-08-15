@@ -38,6 +38,12 @@ Traps already hit on [[project-map-quiz]] — check these first when something b
   reading the body: `PGRST202`/"Could not find the function" = not deployed, a domain error like
   "no such room" = deployed and reachable. (Probe with a room code that cannot exist, e.g. six
   dashes — room codes are alphanumeric, so it can only raise, never mutate.)
+- **Caddy `import` globs are relative to the PROCESS's working directory**, not to the Caddyfile.
+  Debian's unit sets no `WorkingDirectory` → `import conf.d/*.caddyfile` resolved against `/`,
+  matched nothing, and was **silently ignored** — no error, no log line, `caddy validate` still
+  passed, and nothing listened on :8080 (hit on the first real deploy, 2026-08-15). Always import by
+  absolute path. Corollary: **`caddy validate` is worthless as a health check**; use
+  `caddy adapt --config … | grep -F ':<port>"'`, which is what `setup-server.sh`/`doctor.sh` now do.
 - **Chrome will not fire `beforeinstallprompt` without a registered service worker** that has a
   `fetch` handler. `public/sw.js` exists only for that; it caches NOTHING (§11.6 forbids an
   aggressive cache) and is registered in prod builds only.

@@ -184,6 +184,7 @@ the bundle — that prefix is exactly what would leak a secret, so never apply i
 
 | Symptom | Cause / fix |
 |---|---|
+| Every HTTP check fails but Caddy is active | Nothing is listening on the port. Check the `import` line in `/etc/caddy/Caddyfile` is an **absolute** path: Caddy resolves a relative import glob against its working directory, matches nothing, and silently loads no site — `caddy validate` still passes. Confirm with `sudo caddy adapt --config /etc/caddy/Caddyfile \| grep -c 8080`. |
 | `/geo/*.topo.json` "loads" but `JSON.parse` fails | The SPA fallback answered with `index.html` and a **200**. Check the body, not the status — `doctor.sh` does exactly this. |
 | Blank page, console: "Missing VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY" | `.env` was empty or filled in *after* the build. Redeploy — these are inlined at build time. |
 | Turnstile never passes | The widget's hostname list omits your domain, or Supabase Auth has a different/blank Turnstile secret. |

@@ -86,10 +86,20 @@ else fail "humboldt-upload is not active — journalctl -u humboldt-upload -n 30
 if [[ $SKIP_CADDY -eq 1 ]]; then
   skip "Caddy checks skipped"
 else
-  if caddy validate --config /etc/caddy/Caddyfile >/dev/null 2>&1; then pass "caddy validate"
-  else fail "caddy validate — caddy validate --config /etc/caddy/Caddyfile"; fi
   if systemctl is-active --quiet caddy; then pass "caddy is active"
   else fail "caddy is not active"; fi
+
+  # `caddy validate` is NOT sufficient and gives a dangerously reassuring PASS:
+  # a Caddyfile whose import glob matches nothing validates perfectly and serves
+  # no site at all. Only the ADAPTED config proves our site is really loaded.
+  adapted="$(caddy adapt --config /etc/caddy/Caddyfile 2>/dev/null)"
+  if [[ -z "$adapted" ]]; then
+    fail "could not adapt /etc/caddy/Caddyfile — invalid config, or unreadable as this user (try sudo)"
+  elif grep -qF ":$PORT\"" <<<"$adapted"; then
+    pass "caddy config has the Humboldt site on :$PORT"
+  else
+    fail "caddy has NO site on :$PORT — is the import in /etc/caddy/Caddyfile an ABSOLUTE path? A relative import glob silently matches nothing."
+  fi
 fi
 
 # 5 ── the app shell

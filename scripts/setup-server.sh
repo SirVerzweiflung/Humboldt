@@ -248,19 +248,35 @@ else
 
   # Additive on purpose: this box may already serve other sites, and silently
   # replacing the main Caddyfile would take them down.
+  #
+  # CONSTRAINT The import path must be ABSOLUTE. Caddy resolves a relative
+  # import glob against the caddy process's working directory — not against the
+  # Caddyfile's own directory — and Debian's unit sets no WorkingDirectory. A
+  # glob that matches nothing is then silently ignored: no error, no warning,
+  # `caddy validate` still passes, and the site simply never loads.
+  CADDY_IMPORT="import $(dirname "$CADDY_SNIPPET")/*.caddyfile"
   touch "$CADDY_MAIN"
-  if grep -q '^import conf.d/\*\.caddyfile' "$CADDY_MAIN"; then
+
+  # Repair the relative line written by earlier versions of this script.
+  if grep -q '^import conf\.d/\*\.caddyfile$' "$CADDY_MAIN"; then
+    does "repairing relative import line in $CADDY_MAIN (it matched no files)"
+    sed -i "s|^import conf\.d/\*\.caddyfile$|$CADDY_IMPORT|" "$CADDY_MAIN"
+  fi
+
+  if grep -qF "$CADDY_IMPORT" "$CADDY_MAIN"; then
     skip "import line in $CADDY_MAIN"
   else
     does "import line in $CADDY_MAIN"
-    printf '\n# Added by Humboldt scripts/setup-server.sh\nimport conf.d/*.caddyfile\n' >>"$CADDY_MAIN"
+    printf '\n# Added by Humboldt scripts/setup-server.sh\n%s\n' "$CADDY_IMPORT" >>"$CADDY_MAIN"
   fi
 
-  if caddy validate --config "$CADDY_MAIN" >/dev/null 2>&1; then
-    note "caddy validate: ok"
-  else
-    die "caddy validate failed — run: caddy validate --config $CADDY_MAIN"
+  # Adapt, don't just validate: validate passes on a config that imports
+  # nothing. Only the adapted output proves the site is really there.
+  if ! caddy adapt --config "$CADDY_MAIN" 2>/dev/null | grep -qF ":$PORT\""; then
+    caddy validate --config "$CADDY_MAIN" || true
+    die "Caddy config has no site on :$PORT — is $CADDY_SNIPPET imported by $CADDY_MAIN?"
   fi
+  note "caddy config contains the site on :$PORT"
   systemctl reload caddy 2>/dev/null || systemctl restart caddy
 fi
 
