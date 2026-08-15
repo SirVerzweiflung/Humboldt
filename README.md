@@ -191,7 +191,7 @@ the bundle — that prefix is exactly what would leak a secret, so never apply i
 | Image upload returns 502 | `journalctl -u humboldt-upload -n 50`. |
 | Uploaded image 404s on the board | Caddy's `handle_path /uploads/*` block is missing or points at the wrong directory. It must serve the live upload dir, never the release. |
 | No **Install app** button | Chrome needs a registered service worker, HTTPS and a manifest. Dev builds register no worker by design. iOS never shows a button — use Share → Add to Home Screen. |
-| Chip shows `may dim` | The OS refused the wake lock (power saver, low battery) or the browser has no Wake Lock API. Set the device's auto-lock to Never as a fallback. |
+| A status chip appeared | It is silent when all is well, so it only shows up for a reason: `reconnecting`/`offline` is the realtime channel, `▢ may dim` means the OS refused the wake lock (power saver, low battery) or the browser has no Wake Lock API — set the device's auto-lock to Never as a fallback. |
 | Everything errored overnight | The Supabase project auto-paused after 7 idle days. Restore it from the dashboard. |
 | `pnpm install` fails on build scripts | Needs pnpm 10 with `pnpm.onlyBuiltDependencies: ["esbuild"]` (already in `package.json`). |
 | Host tablet locked and the room looks stuck | Expected. The DB holds the truth; unlocking triggers a resync. If the tab is gone, open `/host` anywhere and rejoin by room code. |
@@ -205,8 +205,9 @@ Logs: `journalctl -u humboldt-upload -f`, `journalctl -u caddy -f`.
 1. Restore the Supabase project if it has paused (7-day rule).
 2. `./scripts/doctor.sh` — expect all checks to pass.
 3. Open the Board, go fullscreen, confirm the room code and QR sit inside a 5 % safe inset (some TVs
-   crop the edges over HDMI) and that the status chip reads **live / awake**.
-4. Set the host tablet to never auto-lock; confirm its chip also reads **awake**.
+   crop the edges over HDMI) and that **no status chip is visible** — it only appears when something
+   is wrong.
+4. Set the host tablet to never auto-lock; confirm no chip is showing there either.
 5. Have the quizcode ready; create the room, attach the quiz, step through the questions once.
 6. Confirm one phone can join, submit, and see a reveal.
 

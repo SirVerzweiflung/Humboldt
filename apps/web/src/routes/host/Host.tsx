@@ -192,6 +192,14 @@ function HostGame({ snap, code, run, onLeave, banner, status }: {
   const [previewIdx, setPreviewIdx] = useState(snap.room.current_round_idx);
   const [confirmUnlock, setConfirmUnlock] = useState<string | null>(null);
 
+  // Follow the game: advancing a round selects the new question in the list.
+  // Keyed on current_round_idx alone, so browsing to another question mid-round
+  // is not fought — the selection only snaps back when the round actually moves.
+  const activeIdx = snap.room.current_round_idx;
+  useEffect(() => {
+    setPreviewIdx(activeIdx);
+  }, [activeIdx]);
+
   const colors = colorMap(snap.players.map((p) => p.id));
   const previewRound = snap.rounds[previewIdx] ?? active;
   const isActivePreview = previewRound?.idx === snap.room.current_round_idx;
@@ -239,12 +247,21 @@ function HostGame({ snap, code, run, onLeave, banner, status }: {
         {/* question list */}
         <aside className="w-48 shrink-0 overflow-y-auto bg-black/10 p-2">
           <p className="mb-1 text-xs font-semibold opacity-70">Questions</p>
-          {snap.rounds.map((r) => (
-            <button key={r.id} onClick={() => setPreviewIdx(r.idx)}
-              className={`mb-1 block w-full truncate rounded px-2 py-1 text-left text-sm ${r.idx === previewIdx ? "bg-white text-gunmetal" : "bg-white/10"}`}>
-              {r.idx + 1}. {r.prompt || "untitled"} {r.idx === snap.room.current_round_idx && "●"}
-            </button>
-          ))}
+          {snap.rounds.map((r) => {
+            const selected = r.idx === previewIdx;
+            const playing = r.idx === activeIdx;
+            return (
+              <button key={r.id} onClick={() => setPreviewIdx(r.idx)}
+                className={`mb-1 flex w-full items-center gap-1 rounded px-2 py-1 text-left text-sm ${selected ? "bg-white text-gunmetal" : "bg-white/10"}`}>
+                <span className="min-w-0 flex-1 truncate">{r.idx + 1}. {r.prompt || "untitled"}</span>
+                {playing && (
+                  <span className={`shrink-0 rounded px-1 text-[10px] font-bold uppercase ${selected ? "bg-pacific text-white" : "bg-white text-gunmetal"}`}>
+                    playing
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </aside>
 
         {/* map + prompt */}

@@ -58,9 +58,12 @@ function BoardRoom({ code }: { code: string }) {
   const { snap, connection } = useRoom(code);
   // The projector must never dim for the whole event (§11.1).
   const wake = useWakeLock(true);
-  // Top-left, inside the 5 % overscan-safe inset (§11.5) so a cropping TV keeps it.
+  // Bottom-right, inside the 5 % overscan-safe inset (§11.5) so a cropping TV
+  // keeps it. Out of the way of the question, which owns the top of the screen —
+  // and usually invisible anyway, since the chip only renders when something is
+  // wrong.
   const status = (
-    <div className="pointer-events-none absolute left-[3%] top-[3%] z-10">
+    <div className="pointer-events-none absolute bottom-[3%] right-[3%] z-10">
       <StatusChip connection={connection} wake={wake} />
     </div>
   );

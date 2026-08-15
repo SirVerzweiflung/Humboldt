@@ -294,7 +294,13 @@ function InRoom({
   const head = (
     <div className="flex w-full items-center gap-3">
       <p className="text-lg font-bold">Hi {player.nickname}</p>
-      <StatusChip connection={connection} wake={wake === "held" ? wake : undefined} className="ml-auto" />
+      {/* Only report the lock while we are actually meant to hold one — outside
+          `answering` a released lock is correct, not a fault worth flagging. */}
+      <StatusChip
+        connection={connection}
+        wake={snap.room.phase === "answering" ? wake : undefined}
+        className="ml-auto"
+      />
     </div>
   );
 

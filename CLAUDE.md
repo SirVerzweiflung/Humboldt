@@ -506,8 +506,14 @@ Same trick applies anywhere visibility changes rather than existence.
 
 **As built:** `useRoom` returns a `connection` value (`connected | reconnecting | offline`) derived
 from the channel's `subscribe()` status plus `navigator.onLine`; `shared/StatusChip.tsx` renders it
-next to the wake-lock state (§11.1) on Host, Board and Play. Palette mapping: `white/20` when
-connected, `wheat` while reconnecting, `pink` when offline.
+next to the wake-lock state (§11.1) on Host, Board and Play.
+
+`CONSTRAINT` **The chip is an exception reporter, not a dashboard.** It renders `null` when
+everything is nominal (`connected` + wake `held`) — those are the states you get 99 % of an evening
+and they are noise on a projector. So *a visible chip means something needs attention*: `wheat`
+`reconnecting`, `pink` `offline`, `wheat` `▢ may dim`. On the Board it sits bottom-right inside the
+overscan-safe inset, clear of the question. Play only passes a wake state while the round is
+`answering`, since a released lock outside that is correct rather than a fault.
 
 The original intent, for reference: a persistent connection chip on all three screens, driven by
 channel status + `navigator.onLine`. On the phone, if a submit fails,
@@ -1031,8 +1037,9 @@ durable storage for the anon session on iOS.
 
 1. Restore the Supabase project if it has paused (7-day rule).
 2. Open the Board, go fullscreen, confirm the room code and QR are inside the safe area.
-3. Set the tablet to never auto-lock; confirm the status chip reads **live / awake** (§5). `pink`
-   means offline, `wheat` means reconnecting, and `▢ may dim` means the OS refused the wake lock.
+3. Set the tablet to never auto-lock; confirm **no status chip is showing** on Board or Host — the
+   chip is silent when connected and awake, so anything visible (`reconnecting`, `offline`,
+   `▢ may dim`) is a problem to fix now (§5).
 4. Have the quizcode ready; create the room from it and step through every round in a "dry run" mode
    that shows the surface without opening answering (`OPEN` — worth building, it catches broken
    images and bad bboxes).
