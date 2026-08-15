@@ -31,4 +31,13 @@ Traps already hit on [[project-map-quiz]] — check these first when something b
   `stop.sh` kills the whole group by negative PID.
 - **Anon sign-in is CAPTCHA-gated** (Cloudflare Turnstile in Supabase Auth). `<AuthGate>` shows the
   widget on first visit only; needs `VITE_TURNSTILE_SITE_KEY` and the widget's hostname list to
-  include the test origin (localhost).
+  include the test origin (localhost). `AuthGate` now wraps each ROLE route individually, not the
+  whole router — `/` must stay ungated or you get a captcha before choosing a role.
+- **`GET /rest/v1/` returns 401 to the anon key** — Supabase disables the PostgREST OpenAPI root for
+  anon, so it is useless as a liveness probe. Test reachability by calling a real RPC instead and
+  reading the body: `PGRST202`/"Could not find the function" = not deployed, a domain error like
+  "no such room" = deployed and reachable. (Probe with a room code that cannot exist, e.g. six
+  dashes — room codes are alphanumeric, so it can only raise, never mutate.)
+- **Chrome will not fire `beforeinstallprompt` without a registered service worker** that has a
+  `fetch` handler. `public/sw.js` exists only for that; it caches NOTHING (§11.6 forbids an
+  aggressive cache) and is registered in prod builds only.

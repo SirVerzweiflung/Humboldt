@@ -12,18 +12,25 @@ Repo `Humboldt` (remote `git@github.com:SirVerzweiflung/Humboldt.git`, branch `m
 uploaded image; host reveals pins one by one, drops the real solution, awards points by hand). Working
 title "Map Quiz". Party game for a known group, not a security-critical app.
 
-Three React routes in one Vite app (`apps/web`): **/play** (phone), **/host** (tablet), **/board**
-(TV), plus **/quiz** (the editor). One Supabase project (Postgres + Realtime + anon Auth + RLS; NO
-Supabase Storage — see [[architecture-decisions]]). Supabase project ref `hmnynsajduvwhgslaiow`.
+Five routes in one Vite app (`apps/web`): **/** (role chooser, ungated — the ONLY route outside
+`<AuthGate>`, so no captcha before picking a role; also hosts the PWA install prompt), **/play**
+(phone), **/host** (tablet), **/board** (TV), **/quiz** (editor, linked only from /host). One
+Supabase project (Postgres + Realtime + anon Auth + RLS; NO Supabase Storage — see
+[[architecture-decisions]]). Supabase project ref `hmnynsajduvwhgslaiow`.
 
 **CLAUDE.md in the repo is the canonical architecture doc** — always read it; it's kept in sync with
 every architectural change in the same commit. Don't duplicate it here; this memory holds the
 cross-session context, decisions rationale, and traps that aren't obvious from the code.
 
-Build progress (as of 2026-08): scaffold ✓ · realtime sync ✓ (dummy_pings, now unused) · Turnstile
-captcha gate ✓ · quiz editor ✓ · player join/name flow ✓ · **full game logic ✓** (lobby → answering
-→ revealing → ended). Migrations 0001–0009 deployed.
+Build progress (as of 2026-08-15): scaffold ✓ · realtime sync ✓ (dummy_pings, now unused) ·
+Turnstile captcha gate ✓ · quiz editor ✓ · player join/name flow ✓ · **full game logic ✓** (lobby →
+answering → revealing → ended) · **CLAUDE.md §13 step 9 ✓ except visual polish**: wake locks +
+status chip, PWA (manifest, icons, no-cache SW, install prompt), landing page, and the scripted
+deploy pipeline. Migrations 0001–0009 deployed.
 
-Deferred / next: richer round-transition polish; drop the now-unused `dummy_pings` table; freeze
-`answers.distance` in DB for export; JSON/CSV results export; import path for quizzes. See
-[[architecture-decisions]], [[map-quiz-gotchas]], [[deploy-verify-workflow]].
+Deferred / next: visual polish (user does this while play-testing); in-app pre-quiz checklist page;
+drop the now-unused `dummy_pings` table; freeze `answers.distance` in DB for export; JSON/CSV
+results export; import path for quizzes. See [[architecture-decisions]], [[map-quiz-gotchas]],
+[[deploy-verify-workflow]].
+
+Design + plan docs for step 9 live in `docs/superpowers/{specs,plans}/2026-08-11-*`.

@@ -9,6 +9,18 @@ metadata:
 
 Deploy loop for [[project-map-quiz]]:
 
+- **The server pipeline is three scripts** (added 2026-08-15): `scripts/setup-server.sh` (idempotent
+  Debian install — probes and prints "present — skipping"; prompts only for Supabase URL/anon key +
+  Turnstile site key; generates and then PRESERVES `UPLOAD_TOKEN`), `scripts/deploy.sh` (build →
+  `releases/<ts>` → `ln`+`mv -T` atomic swap, keeps 5), `scripts/doctor.sh` (9 PASS/FAIL checks,
+  runs all of them even after a failure). Templates in `deploy/`. **Contract: plain HTTP on
+  `127.0.0.1:<port>`, default 8080** — TLS/DNS/tunnel are deliberately NOT in any repo script.
+  Caddy is integrated additively (snippet in `conf.d/` + guarded `import`), never by rewriting the
+  main Caddyfile.
+- **`doctor.sh` encodes the two traps that actually bite**: it greps the *live bundle* for the
+  server's `UPLOAD_TOKEN` (client half is inlined at build time — rotating one side alone breaks
+  uploads silently), and it checks the *body* of `/geo/manifest.json`, not its status.
+
 - **Migrations deploy via GitHub integration**: push to `main` → Supabase applies
   `supabase/migrations/*`. There is no local Supabase running; SQL isn't testable locally. So write
   the migration, commit + push, then **poll to confirm it landed before telling the user it's fixed.**
